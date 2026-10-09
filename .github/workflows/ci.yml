@@ -41,7 +41,7 @@ jobs:
         run: coverage report
 
   lint:
-    name: actionlint and pins
+    name: actionlint, shellcheck and pins
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -54,6 +54,12 @@ jobs:
         run: >
           docker run --rm --volume "$PWD:/repo:ro" --workdir /repo
           "$ACTIONLINT_IMAGE" -color
+      # The actionlint image carries shellcheck, which it runs on the workflows'
+      # `run:` steps. The same binary lints the scripts.
+      - name: Lint the shell scripts
+        run: >
+          docker run --rm --volume "$PWD:/repo:ro" --workdir /repo --entrypoint shellcheck
+          "$ACTIONLINT_IMAGE" scripts/*.sh
       # The three steps below each print the lines that break the rule, if any.
       - name: Check that every image in versions.env is pinned by digest
         run: |
