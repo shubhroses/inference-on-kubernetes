@@ -11,6 +11,13 @@
 # what each container was using on a CI runner a few minutes after `make up`:
 # about 600 MB between them, and next to no CPU. There are no limits: a test
 # cluster gains nothing from a Prometheus that is killed for outgrowing one.
+#
+# Everything runs on the control-plane node. The end-to-end tests drain the
+# workers, and Prometheus keeps its data in the pod: evicted from a worker, it
+# would come back empty, and the tests that follow need what it has collected.
+# So each of the four workloads below selects that node by its label and
+# tolerates the taint that keeps other pods off it. YAML lets the two settings
+# be written once (&name) and repeated (*name).
 
 # Nothing is sent anywhere when an alert fires. Which alerts are firing can be
 # read from Prometheus itself.
@@ -46,6 +53,12 @@ prometheusOperator:
   # A Service that lists the kubelets, for the scraping that is switched off above.
   kubeletService:
     enabled: false
+  nodeSelector: &onTheControlPlane
+    node-role.kubernetes.io/control-plane: ""
+  tolerations: &toleratesItsTaint
+    - key: node-role.kubernetes.io/control-plane
+      operator: Exists
+      effect: NoSchedule
   resources:
     requests:
       cpu: 10m
@@ -59,6 +72,8 @@ prometheus:
     # chart does not have to know what the monitoring release is called.
     serviceMonitorSelectorNilUsesHelmValues: false
     ruleSelectorNilUsesHelmValues: false
+    nodeSelector: *onTheControlPlane
+    tolerations: *toleratesItsTaint
     resources:
       requests:
         cpu: 50m
@@ -88,12 +103,16 @@ grafana:
     auth.anonymous:
       enabled: true
       org_role: Viewer
+  nodeSelector: *onTheControlPlane
+  tolerations: *toleratesItsTaint
   resources:
     requests:
       cpu: 50m
       memory: 256Mi
 
 kube-state-metrics:
+  nodeSelector: *onTheControlPlane
+  tolerations: *toleratesItsTaint
   resources:
     requests:
       cpu: 10m
