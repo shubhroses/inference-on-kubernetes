@@ -30,6 +30,11 @@ service:
   # The port clients inside the cluster connect to.
   port: 80
 
+metrics:
+  # How often Prometheus scrapes each pod. Nothing that is worked out from the
+  # metrics can notice a change sooner than this.
+  scrapeInterval: 15s
+
 # Measured on a laptop with the defaults above: a pod uses about 40 MiB of
 # memory, and about a tenth of a core when all eight slots are busy.
 resources:

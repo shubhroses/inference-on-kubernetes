@@ -11,6 +11,7 @@ import os
 import subprocess
 import time
 import uuid
+from collections.abc import Callable
 
 import pytest
 
@@ -55,12 +56,15 @@ print(json.dumps({"status": response.status, "body": response.read().decode()}))
 
 
 def kubectl(*arguments: str) -> str:
-    """Run kubectl and return what it printed. A command that fails, fails the test."""
+    """Run kubectl and return what it printed.
+
+    A command that fails, fails the test: with an assertion, so that a test
+    which is waiting for the cluster to catch up can use `eventually` to try again.
+    """
     result = subprocess.run(
         ["kubectl", *arguments], capture_output=True, text=True, timeout=60, check=False
     )
-    if result.returncode != 0:
-        pytest.fail(f"kubectl {' '.join(arguments)} failed:\n{result.stderr}")
+    assert result.returncode == 0, f"kubectl {' '.join(arguments)} failed:\n{result.stderr}"
     return result.stdout
 
 
@@ -105,6 +109,23 @@ def run_in_pod(*command: str) -> str:
         return output
     finally:
         kubectl("delete", "pod", pod, IN_CLIENT_NAMESPACE, "--wait=false")
+
+
+def eventually[Result](check: Callable[[], Result], seconds: float = PATIENCE_SECONDS) -> Result:
+    """Call a check that asserts, again and again, until it passes. Returns what it returns.
+
+    The cluster reaches the state a test expects in its own time, so a test
+    states that state as assertions and hands them to this function. If they
+    still do not hold when the time is up, the test fails with the last failure.
+    """
+    deadline = time.monotonic() + seconds
+    while True:
+        try:
+            return check()
+        except AssertionError:
+            if time.monotonic() >= deadline:
+                raise
+        time.sleep(2)
 
 
 def wait_until_finished(pod: str) -> str:

@@ -1,0 +1,20 @@
+# Tells Prometheus to scrape every pod behind the Service. A ServiceMonitor is
+# an object of the Prometheus Operator, so the cluster has to have the
+# operator's CRDs before this chart is installed.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    {{- include "inference.labels" . | nindent 4 }}
+spec:
+  # Which Services, in this namespace. Prometheus then scrapes each pod behind
+  # them on its own address, not through the Service, so every series carries
+  # the name of the pod it came from.
+  selector:
+    matchLabels:
+      {{- include "inference.selectorLabels" . | nindent 6 }}
+  endpoints:
+    # The Service's port of this name: the one that serves requests, at /metrics.
+    - port: http
+      interval: {{ .Values.metrics.scrapeInterval }}

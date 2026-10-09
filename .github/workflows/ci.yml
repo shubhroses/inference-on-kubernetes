@@ -106,18 +106,23 @@ jobs:
           helm lint --strict chart --values chart/values-kind.yaml --set-string image.tag="$GITHUB_SHA"
       # kubeconform checks each rendered object against the API schema of the
       # Kubernetes version the test cluster runs, so a misspelt field or a value
-      # of the wrong type fails here, without a cluster. pipefail makes a
-      # failing `helm template` fail the step, where it would otherwise hand
-      # kubeconform an empty input to approve.
-      - name: Validate the rendered manifests against the Kubernetes API schemas
+      # of the wrong type fails here, without a cluster. The second schema
+      # location is for the kinds Kubernetes itself does not define, such as
+      # ServiceMonitor; kubeconform fills in the {{ }} parts for each object.
+      # pipefail makes a failing `helm template` fail the step, where it would
+      # otherwise hand kubeconform an empty input to approve.
+      - name: Validate the rendered manifests against the API schemas
         run: |
           set -o pipefail
+          crd_schemas="https://raw.githubusercontent.com/datreeio/CRDs-catalog/$CRD_SCHEMAS_COMMIT"
           for values in chart/values.yaml chart/values-kind.yaml; do
             echo "With $values:"
             helm template inference chart --namespace inference --values "$values" \
               --set-string image.tag="$GITHUB_SHA" |
               docker run --rm --interactive "$KUBECONFORM_IMAGE" \
-                -strict -verbose -summary -kubernetes-version "$KUBERNETES_VERSION" -
+                -strict -verbose -summary -kubernetes-version "$KUBERNETES_VERSION" \
+                -schema-location default \
+                -schema-location "$crd_schemas/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json" -
           done
 
   image:

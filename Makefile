@@ -55,14 +55,21 @@ help:
 	@echo "make e2e    run the end-to-end tests against the kind cluster"
 	@echo "make down   delete the kind cluster"
 
+# Monitoring goes in before the service: the service's chart creates a
+# ServiceMonitor, a kind of object that exists only once the monitoring chart
+# has defined it.
 up: cluster monitoring deploy
 
 test:
 	coverage run -m pytest
 	coverage report
 
+# The tests share one cluster and run in a fixed order, each building on what
+# the ones before it showed, so the run stops at the first failure. Going on
+# would mean waiting out every later test's patience on a cluster whose state
+# is no longer known.
 e2e: check-context
-	GIT_SHA=$(GIT_SHA) pytest --verbose e2e
+	GIT_SHA=$(GIT_SHA) pytest --verbose --exitfirst e2e
 
 # kind talks to Docker, not to Kubernetes, and only about the cluster named
 # here, so `down` and `cluster` need no context check. kind is told where the
