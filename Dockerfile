@@ -1,7 +1,8 @@
-# The Python image both stages start from. The tag is for the reader; the
-# digest is what gets pulled. versions.env records the same reference, and CI
-# fails if the two differ.
-FROM docker.io/library/python:3.13.16-slim-trixie@sha256:bf44cdfcb76cd3b41e879bc058fc37ec5872002ccfde7fcb765e218cde0cd79c AS base
+# The Python image both stages start from: Docker Hub's official one, pulled
+# from Google's mirror of Docker Hub (versions.env says why). The tag is for
+# the reader; the digest is what gets pulled. versions.env records the same
+# reference, and CI fails if the two differ.
+FROM mirror.gcr.io/library/python:3.13.16-slim-trixie@sha256:bf44cdfcb76cd3b41e879bc058fc37ec5872002ccfde7fcb765e218cde0cd79c AS base
 
 
 # Build stage: install the locked dependencies into a virtualenv.

@@ -80,6 +80,11 @@ prometheus:
         memory: 128Mi
 
 grafana:
+  # Grafana's is the one image of this chart that comes from Docker Hub. The
+  # nodes pull it from Google's mirror of Docker Hub instead, for the reason
+  # given in versions.env.
+  image:
+    registry: mirror.gcr.io
   # The dashboards this chart ships are about the components that are not
   # scraped here. The one dashboard in this Grafana comes with the service's
   # chart.
