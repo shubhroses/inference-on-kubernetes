@@ -1,0 +1,275 @@
+# Unit tests for the alert rules with the windows and thresholds a real cluster
+# gets. scripts/test-rules.sh renders the chart with its default values and has
+# `promtool test rules` evaluate the result over the made-up series below.
+#
+# When an error-budget alert fires
+# --------------------------------
+# The objective is 99%, so the error budget is 1% of the requests. An alert
+# with burn rate B fires while the error ratio is above B x 1% over its long
+# window and over its short window: above 14.4% for the page (1 h and 5 min)
+# and above 6% for the ticket (6 h and 30 min).
+#
+# Suppose requests arrive at a steady rate and, from some moment on, a share e
+# of them fails. A time t later, a window of length W that reaches back past
+# that moment holds t of failing traffic and W - t of healthy traffic, so its
+# error ratio is e x t / W. That passes the threshold at
+#
+#     t = B x 1% x W / e
+#
+# The short window gets there in a twelfth of the time the long one needs, so
+# the long window decides when the alert fires:
+#
+#     every request fails   page    14.4% x 60 min / 100%  =  8.64 min
+#     20% fail              page    14.4% x 60 min / 20%   =  43.2 min
+#     10% fail              page    never: 10% is below 14.4% however long it lasts
+#                           ticket  6% x 360 min / 10%     =  216 min  =  3 h 36 min
+#
+# When the failures stop, the short window decides. A time s after the last
+# failure its error ratio is e x (W - s) / W, which is back under the threshold
+# at s = W x (1 - B x 1% / e). That is longest when every request had failed:
+#
+#     page clears           5 min x (1 - 14.4%)            =  4.28 min
+#
+# What the tests can show of this
+# -------------------------------
+# Every series has one sample a minute and the rules are evaluated once a
+# minute, so an alert changes on a whole minute: "fires after 8.64 minutes"
+# shows as silent at minute 8 and firing at minute 9. Each test pins the change
+# down between two such evaluations, one on either side of the figure above.
+# Clearing looks up to a minute early here, because a window sees the failures
+# only through the samples inside it: five samples, in the five-minute window,
+# which are four minutes apart end to end. A cluster is finer-grained: a sample
+# every 15 seconds and an evaluation every 30.
+#
+# In every test the failures begin after as much healthy traffic as the long
+# window holds. That is the slowest case: with less traffic before them, the
+# failures are a larger share of the window sooner.
+
+rule_files:
+  - production.rules.yaml
+
+evaluation_interval: 1m
+
+tests:
+  - name: When every request fails, the page fires within 10 minutes
+    interval: 1m
+    input_series:
+      # 600 requests a minute. For an hour they succeed, then all of them fail.
+      - series: 'inference_requests_total{namespace="inference", job="inference", pod="a", outcome="ok"}'
+        values: '0+600x60 36000x14'
+      - series: 'inference_requests_total{namespace="inference", job="inference", pod="a", outcome="error"}'
+        values: '0x60 600+600x14'
+    alert_rule_test:
+      # Eight and nine minutes into the failures.
+      - eval_time: 1h8m
+        alertname: InferenceErrorBudgetFastBurn
+        exp_alerts: []
+      - eval_time: 1h9m
+        alertname: InferenceErrorBudgetFastBurn
+        # "&page" names what follows, so that later tests can expect the same
+        # alert by writing "*page".
+        exp_alerts: &page
+          - exp_labels:
+              severity: page
+              namespace: inference
+              job: inference
+              window: 1h
+            exp_annotations:
+              summary: Requests are failing 14.4 times faster than the objective of 0.99 allows.
+              description: >-
+                The share of requests answered with a 5xx or shed with a 429 has
+                been more than 14.4 times the error budget over the last 1h and
+                over the last 5m.
+
+  - name: When 20% of the requests fail, the page fires at about minute 43
+    interval: 1m
+    input_series:
+      # Two pods with 300 requests a minute each. After an hour, 60 a minute
+      # fail on each: with a 5xx on one pod, with a 429 on the other. Both
+      # outcomes count, and the ratio is that of the pods taken together.
+      - series: 'inference_requests_total{namespace="inference", job="inference", pod="a", outcome="ok"}'
+        values: '0+300x60 18240+240x59'
+      - series: 'inference_requests_total{namespace="inference", job="inference", pod="a", outcome="error"}'
+        values: '0x60 60+60x59'
+      - series: 'inference_requests_total{namespace="inference", job="inference", pod="b", outcome="ok"}'
+        values: '0+300x60 18240+240x59'
+      - series: 'inference_requests_total{namespace="inference", job="inference", pod="b", outcome="rejected"}'
+        values: '0x60 60+60x59'
+    alert_rule_test:
+      # 40, 42 and 44 minutes into the failures.
+      - eval_time: 1h40m
+        alertname: InferenceErrorBudgetFastBurn
+        exp_alerts: []
+      - eval_time: 1h42m
+        alertname: InferenceErrorBudgetFastBurn
+        exp_alerts: []
+      - eval_time: 1h44m
+        alertname: InferenceErrorBudgetFastBurn
+        exp_alerts: *page
+
+  - name: When 10% of the requests fail, the page never fires and the ticket is raised after about 3 h 36 min
+    interval: 1m
+    input_series:
+      # 600 requests a minute. For six hours they succeed, then 60 a minute
+      # fail, for eight hours.
+      - series: 'inference_requests_total{namespace="inference", job="inference", pod="a", outcome="ok"}'
+        values: '0+600x360 216540+540x479'
+      - series: 'inference_requests_total{namespace="inference", job="inference", pod="a", outcome="error"}'
+        values: '0x360 60+60x479'
+    alert_rule_test:
+      # The page: an hour, 3 h 36 min, six hours and eight hours into the failures.
+      - eval_time: 7h
+        alertname: InferenceErrorBudgetFastBurn
+        exp_alerts: []
+      - eval_time: 9h36m
+        alertname: InferenceErrorBudgetFastBurn
+        exp_alerts: []
+      - eval_time: 12h
+        alertname: InferenceErrorBudgetFastBurn
+        exp_alerts: []
+      - eval_time: 14h
+        alertname: InferenceErrorBudgetFastBurn
+        exp_alerts: []
+      # The ticket: 3 h 35 min and 3 h 37 min into the failures.
+      - eval_time: 9h35m
+        alertname: InferenceErrorBudgetSlowBurn
+        exp_alerts: []
+      - eval_time: 9h37m
+        alertname: InferenceErrorBudgetSlowBurn
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+              namespace: inference
+              job: inference
+              window: 6h
+            exp_annotations:
+              summary: Requests are failing 6 times faster than the objective of 0.99 allows.
+              description: >-
+                The share of requests answered with a 5xx or shed with a 429 has
+                been more than 6 times the error budget over the last 6h and
+                over the last 30m.
+
+  - name: The page clears within 5 minutes of the failures stopping
+    interval: 1m
+    input_series:
+      # 600 requests a minute: an hour of successes, half an hour in which
+      # every request fails, then successes again.
+      - series: 'inference_requests_total{namespace="inference", job="inference", pod="a", outcome="ok"}'
+        values: '0+600x60 36000x29 36600+600x9'
+      - series: 'inference_requests_total{namespace="inference", job="inference", pod="a", outcome="error"}'
+        values: '0x60 600+600x29 18000x9'
+    alert_rule_test:
+      # The last minute of failures, three minutes after it and five minutes after it.
+      - eval_time: 1h30m
+        alertname: InferenceErrorBudgetFastBurn
+        exp_alerts: *page
+      - eval_time: 1h33m
+        alertname: InferenceErrorBudgetFastBurn
+        exp_alerts: *page
+      - eval_time: 1h35m
+        alertname: InferenceErrorBudgetFastBurn
+        exp_alerts: []
+    # Why there is a short window. Five minutes after the last failure the
+    # ratio over the hour is still far above the threshold (1 means the
+    # comparison holds), and stays there for most of an hour. The long window
+    # alone would keep paging someone about a problem that is over.
+    promql_expr_test:
+      - expr: namespace_job:inference_errors_per_request:ratio_rate{window="1h"} > bool 14.4 * (1 - 0.99)
+        eval_time: 1h35m
+        exp_samples:
+          - labels: '{namespace="inference", job="inference", window="1h"}'
+            value: 1
+
+  - name: Successful requests slower than half a second raise a ticket once they are more than one in twenty
+    interval: 1m
+    input_series:
+      # 600 successful requests a minute. 564 of them, 94%, are answered within
+      # half a second. A histogram counts, for each bound, the requests that
+      # took that long or less.
+      - series: 'inference_request_duration_seconds_bucket{namespace="inference", job="inference", pod="a", outcome="ok", le="0.25"}'
+        values: '0+300x15'
+      - series: 'inference_request_duration_seconds_bucket{namespace="inference", job="inference", pod="a", outcome="ok", le="0.5"}'
+        values: '0+564x15'
+      - series: 'inference_request_duration_seconds_bucket{namespace="inference", job="inference", pod="a", outcome="ok", le="1.0"}'
+        values: '0+600x15'
+      - series: 'inference_request_duration_seconds_bucket{namespace="inference", job="inference", pod="a", outcome="ok", le="+Inf"}'
+        values: '0+600x15'
+    alert_rule_test:
+      # Too slow from the start, but an alert with `for: 5m` waits five minutes.
+      - eval_time: 4m
+        alertname: InferenceLatencyHigh
+        exp_alerts: []
+      - eval_time: 7m
+        alertname: InferenceLatencyHigh
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+              namespace: inference
+              job: inference
+            exp_annotations:
+              summary: One successful request in twenty takes longer than 0.5 s.
+              description: >-
+                The 95th percentile of the time successful requests take,
+                waiting for a model slot included, has been above 0.5 s for five
+                minutes.
+
+  - name: Successful requests slower than half a second raise nothing while they are fewer than one in twenty
+    interval: 1m
+    input_series:
+      # As above, but 576 of the 600, 96%, are answered within half a second.
+      - series: 'inference_request_duration_seconds_bucket{namespace="inference", job="inference", pod="a", outcome="ok", le="0.25"}'
+        values: '0+300x15'
+      - series: 'inference_request_duration_seconds_bucket{namespace="inference", job="inference", pod="a", outcome="ok", le="0.5"}'
+        values: '0+576x15'
+      - series: 'inference_request_duration_seconds_bucket{namespace="inference", job="inference", pod="a", outcome="ok", le="1.0"}'
+        values: '0+600x15'
+      - series: 'inference_request_duration_seconds_bucket{namespace="inference", job="inference", pod="a", outcome="ok", le="+Inf"}'
+        values: '0+600x15'
+    alert_rule_test:
+      - eval_time: 7m
+        alertname: InferenceLatencyHigh
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: InferenceLatencyHigh
+        exp_alerts: []
+
+  - name: Requests queueing while the Deployment has its maximum of replicas raise a ticket
+    interval: 1m
+    input_series:
+      - series: 'inference_requests_queued{namespace="inference", job="inference", pod="a"}'
+        values: '4x10'
+      - series: 'inference_requests_queued{namespace="inference", job="inference", pod="b"}'
+        values: '0x10'
+      # The Deployment as kube-state-metrics reports it: under that exporter's
+      # own job, with the Deployment's namespace.
+      - series: 'kube_deployment_spec_replicas{namespace="inference", deployment="inference", job="kube-state-metrics"}'
+        values: '2x10'
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: InferenceQueueAtMaxReplicas
+        exp_alerts: []
+      - eval_time: 6m
+        alertname: InferenceQueueAtMaxReplicas
+        exp_alerts:
+          - exp_labels:
+              severity: ticket
+              namespace: inference
+              job: inference
+            exp_annotations:
+              summary: Requests are queueing and the Deployment is at its maximum of 2 replicas.
+              description: >-
+                Requests have been waiting for a model slot for five minutes
+                while the Deployment already has as many replicas as it may
+                have. More load will be shed with 429s.
+
+  - name: Requests queueing while the Deployment could still grow raise nothing
+    interval: 1m
+    input_series:
+      - series: 'inference_requests_queued{namespace="inference", job="inference", pod="a"}'
+        values: '4x10'
+      - series: 'kube_deployment_spec_replicas{namespace="inference", deployment="inference", job="kube-state-metrics"}'
+        values: '1x10'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: InferenceQueueAtMaxReplicas
+        exp_alerts: []

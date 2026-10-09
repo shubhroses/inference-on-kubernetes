@@ -71,6 +71,59 @@ metrics:
   # metrics can notice a change sooner than this.
   scrapeInterval: 15s
 
+# The service level objective: the share of requests that has to be answered
+# successfully. A request answered with a 5xx and a request shed with a 429
+# both count as failed. What the objective leaves over, here 1% of the
+# requests, is the error budget.
+slo:
+  objective: 0.99
+
+# The alerts, which templates/prometheusrule.yaml turns into rules for
+# Prometheus.
+alerts:
+  # How often Prometheus works out the error ratios and checks the alerts. An
+  # alert fires or clears at most this long after its condition changed.
+  evaluationInterval: 30s
+
+  # The two alerts on the error budget. Each watches the burn rate: how many
+  # times faster than the objective allows the budget is being spent. At 1, a
+  # budget meant for 30 days lasts 30 days; at 14.4, two days.
+  #
+  # An alert fires while the burn rate is above its threshold over both of its
+  # windows. The long window makes sure that a real share of the budget is
+  # gone and not just one bad minute. The short window makes sure that the
+  # budget is still being spent, so the alert clears soon after the failures
+  # stop, long before they have left the long window.
+  #
+  # What an alert costs before it fires is its burn rate times its long
+  # window, whatever the share of failing requests: the larger the share, the
+  # sooner the long window crosses the threshold. Against a 30-day budget (720
+  # hours) that is 14.4 x 1 h / 720 h = 2% for the first and
+  # 6 x 6 h / 720 h = 5% for the second. The thresholds and windows are the
+  # ones the Google SRE Workbook recommends for those two shares.
+  #
+  # Fast burn pages someone: at this rate the budget is gone within days.
+  fastBurn:
+    burnRate: 14.4
+    longWindow: 1h
+    shortWindow: 5m
+  # Slow burn opens a ticket: too slow to wake anyone, too fast to ignore.
+  slowBurn:
+    burnRate: 6
+    longWindow: 6h
+    shortWindow: 30m
+
+  latency:
+    # A ticket when, for five minutes, fewer than 95% of the successful
+    # requests have been answered within this many seconds. It has to be one
+    # of the bucket bounds of the service's duration histogram (0.1, 0.25,
+    # 0.5, 1, 2.5 and so on; see app/metrics.py): Prometheus knows how many
+    # requests were faster than each bound and nothing about where they fall
+    # in between. With the defaults above a request takes 0.1 s, and 0.3 s at
+    # most when it has to wait behind a full queue, so half a second means
+    # that something else is slow.
+    p95Seconds: 0.5
+
 # Measured on a laptop with the defaults above: a pod uses about 40 MiB of
 # memory, and about a tenth of a core when all eight slots are busy.
 resources:

@@ -134,15 +134,15 @@ check-context:
 
 # What CI keeps when a run fails: the events, the state of the pods, the
 # service's logs and the load generator's, Prometheus's list of what it scrapes
-# and how that is going (asked for through the API server, which passes the
-# request on to the Service), and kind's own dump of each node with the
-# kubelet's and every container's log. The leading "-" lets one command fail
-# without stopping the ones after it.
+# and of its rules, with how each is going (asked for through the API server,
+# which passes the request on to the Service), and kind's own dump of each node
+# with the kubelet's and every container's log. The leading "-" lets one
+# command fail without stopping the ones after it.
 diagnostics: check-context
 	mkdir -p diagnostics
 	-kubectl get events --all-namespaces --sort-by=.metadata.creationTimestamp > diagnostics/events.txt
 	-kubectl get pods --all-namespaces --output wide > diagnostics/pods.txt
-	-kubectl --namespace $(NAMESPACE) describe all,poddisruptionbudgets > diagnostics/describe.txt
+	-kubectl --namespace $(NAMESPACE) describe all,poddisruptionbudgets,prometheusrules > diagnostics/describe.txt
 	-kubectl --namespace $(MONITORING_NAMESPACE) describe all > diagnostics/describe-monitoring.txt
 	-kubectl --namespace $(NAMESPACE) logs --selector app.kubernetes.io/instance=$(RELEASE) \
 		--all-containers --prefix --tail=-1 > diagnostics/logs.txt
@@ -150,4 +150,6 @@ diagnostics: check-context
 		--prefix --tail=-1 > diagnostics/loadgen.txt
 	-kubectl get --raw /api/v1/namespaces/$(MONITORING_NAMESPACE)/services/$(MONITORING_RELEASE)-prometheus:9090/proxy/api/v1/targets \
 		> diagnostics/prometheus-targets.json
+	-kubectl get --raw /api/v1/namespaces/$(MONITORING_NAMESPACE)/services/$(MONITORING_RELEASE)-prometheus:9090/proxy/api/v1/rules \
+		> diagnostics/prometheus-rules.json
 	-kind export logs diagnostics/kind --name $(CLUSTER_NAME)
