@@ -2,10 +2,11 @@
 #
 #   make up     create the kind cluster, build the image and install the chart
 #   make test   run the unit tests, with the coverage floor
+#   make e2e    run the end-to-end tests against the kind cluster
 #   make down   delete the kind cluster
 #
-# `up` and `down` need docker, kind, kubectl and helm on the PATH. CI installs
-# the versions pinned in versions.env.
+# `up`, `e2e` and `down` need docker, kind, kubectl and helm on the PATH. CI
+# installs the versions pinned in versions.env.
 #
 # Cluster safety. Every command below that talks to Kubernetes reads the
 # kubeconfig file named here and no other, and stops unless that file's current
@@ -21,8 +22,8 @@ KUBE_CONTEXT := kind-$(CLUSTER_NAME)
 NAMESPACE := inference
 RELEASE := inference
 
-# The commit being built. It is the image's tag, and the image reports it in
-# its build-info metric.
+# The commit being built and tested. It is the image's tag, the image reports
+# it in its build-info metric, and the smoke test compares that with this.
 GIT_SHA := $(shell git rev-parse HEAD)
 IMAGE := inference-on-kubernetes:$(GIT_SHA)
 
@@ -39,11 +40,12 @@ TIMEOUT := 5m
 # one at a time and in the order written, also under `make -j`.
 .NOTPARALLEL:
 
-.PHONY: help up test down cluster image deploy check-context diagnostics
+.PHONY: help up test e2e down cluster image deploy check-context diagnostics
 
 help:
 	@echo "make up     create the kind cluster, build the image and install the chart"
 	@echo "make test   run the unit tests, with the coverage floor"
+	@echo "make e2e    run the end-to-end tests against the kind cluster"
 	@echo "make down   delete the kind cluster"
 
 up: cluster deploy
@@ -51,6 +53,9 @@ up: cluster deploy
 test:
 	coverage run -m pytest
 	coverage report
+
+e2e: check-context
+	GIT_SHA=$(GIT_SHA) pytest --verbose e2e
 
 # kind talks to Docker, not to Kubernetes, and only about the cluster named
 # here, so `down` and `cluster` need no context check. kind is told where the

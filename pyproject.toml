@@ -14,6 +14,9 @@ select = ["E", "W", "F", "I", "B", "UP", "SIM", "ASYNC", "PT", "S", "RUF"]
 # Tests assert. They also poll the service from outside in a loop, because a
 # test that only sees HTTP responses has no event to wait on.
 "tests/*" = ["S101", "ASYNC110"]
+# The end-to-end tests assert too. They also run kubectl: a fixed command,
+# found on the PATH, with arguments the tests compose themselves.
+"e2e/*" = ["S101", "S603", "S607"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
