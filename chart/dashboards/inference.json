@@ -200,48 +200,35 @@
       "id": 6,
       "type": "timeseries",
       "title": "Burn rate",
-      "description": "How fast the error budget is being spent: the error ratio over each window divided by the 1% the objective allows. At the dashed line, 1, errors arrive exactly as fast as the objective tolerates.",
+      "description": "How fast the error budget is being spent: the error ratio over each window the alerts watch, as the chart's rules record it, divided by the 1% the objective allows. At 1 the budget lasts exactly as long as it is meant to. The alerts compare these lines with the dashed ones: the page fires while both of its windows are above 14.4, the ticket while both of its windows are above 6.",
       "gridPos": { "x": 12, "y": 16, "w": 12, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "targets": [
         {
           "refId": "A",
-          "expr": "sum(rate(inference_requests_total{namespace=\"$namespace\", job=\"$release\", outcome!=\"ok\"}[5m])) / sum(rate(inference_requests_total{namespace=\"$namespace\", job=\"$release\"}[5m])) / 0.01",
-          "legendFormat": "5m"
-        },
-        {
-          "refId": "B",
-          "expr": "sum(rate(inference_requests_total{namespace=\"$namespace\", job=\"$release\", outcome!=\"ok\"}[30m])) / sum(rate(inference_requests_total{namespace=\"$namespace\", job=\"$release\"}[30m])) / 0.01",
-          "legendFormat": "30m"
-        },
-        {
-          "refId": "C",
-          "expr": "sum(rate(inference_requests_total{namespace=\"$namespace\", job=\"$release\", outcome!=\"ok\"}[1h])) / sum(rate(inference_requests_total{namespace=\"$namespace\", job=\"$release\"}[1h])) / 0.01",
-          "legendFormat": "1h"
-        },
-        {
-          "refId": "D",
-          "expr": "sum(rate(inference_requests_total{namespace=\"$namespace\", job=\"$release\", outcome!=\"ok\"}[6h])) / sum(rate(inference_requests_total{namespace=\"$namespace\", job=\"$release\"}[6h])) / 0.01",
-          "legendFormat": "6h"
+          "expr": "namespace_job:inference_errors_per_request:ratio_rate{namespace=\"$namespace\", job=\"$release\"} / 0.01",
+          "legendFormat": "{{window}}"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "none",
           "min": 0,
-          "custom": { "axisSoftMax": 2, "thresholdsStyle": { "mode": "dashed" } },
+          "custom": { "axisSoftMax": 16, "thresholdsStyle": { "mode": "dashed" } },
           "thresholds": {
             "mode": "absolute",
             "steps": [
               { "color": "green", "value": null },
-              { "color": "red", "value": 1 }
+              { "color": "yellow", "value": 1 },
+              { "color": "orange", "value": 6 },
+              { "color": "red", "value": 14.4 }
             ]
           }
         },
         "overrides": []
       },
       "options": {
-        "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull"] },
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull"], "sortBy": "Last *", "sortDesc": true },
         "tooltip": { "mode": "multi" }
       }
     }
