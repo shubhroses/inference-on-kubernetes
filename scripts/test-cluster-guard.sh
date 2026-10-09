@@ -64,6 +64,8 @@ printf 'apiVersion: v1\nkind: Config\ncurrent-context: %s\n' somewhere-else >"$k
 printf 'apiVersion: v1\nkind: Config\ncurrent-context: %s\n' kind-inference-on-kubernetes >"$decoy"
 
 echo "When the current context is not the kind cluster:"
+expect_refusal "$make_refuses 'somewhere-else'" make nodes
+expect_refusal "$make_refuses 'somewhere-else'" make monitoring
 expect_refusal "$make_refuses 'somewhere-else'" make deploy
 expect_refusal "$make_refuses 'somewhere-else'" make e2e
 expect_refusal "$make_refuses 'somewhere-else'" make diagnostics

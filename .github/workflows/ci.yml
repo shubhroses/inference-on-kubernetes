@@ -60,9 +60,9 @@ jobs:
           docker run --rm --volume "$PWD:/repo:ro" --workdir /repo --entrypoint shellcheck
           "$ACTIONLINT_IMAGE" --external-sources scripts/*.sh
       # The four steps below each print the lines that break the rule, if any.
-      - name: Check that every image in versions.env is pinned by digest
+      - name: Check that every image and chart in versions.env is pinned by digest
         run: |
-          if grep -E '^[A-Z0-9_]+_IMAGE=' versions.env | grep -Ev '@sha256:[0-9a-f]{64}$'; then
+          if grep -E '^[A-Z0-9_]+_(IMAGE|CHART)=' versions.env | grep -Ev '@sha256:[0-9a-f]{64}$'; then
             exit 1
           fi
       - name: Check that every action is pinned to a commit SHA

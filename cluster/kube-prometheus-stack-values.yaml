@@ -1,0 +1,98 @@
+# Values for the kube-prometheus-stack chart, which `make up` installs in the
+# namespace `monitoring` at the version pinned in versions.env.
+#
+# The chart is made to monitor a whole cluster. Here it watches one service, on
+# a cluster whose three nodes share the two CPUs and 8 GB of a CI runner, or a
+# corner of a laptop, so everything that job does not need is switched off.
+# What is left: the Prometheus Operator, one Prometheus, Grafana, and
+# kube-state-metrics, which reports how many replicas a Deployment has.
+#
+# The chart sets no resource requests of its own. The ones below are close to
+# what each container was using on a CI runner a few minutes after `make up`:
+# about 600 MB between them, and next to no CPU. There are no limits: a test
+# cluster gains nothing from a Prometheus that is killed for outgrowing one.
+
+# Nothing is sent anywhere when an alert fires. Which alerts are firing can be
+# read from Prometheus itself.
+alertmanager:
+  enabled: false
+
+# The chart's own alerts and recording rules are about the cluster's
+# components, most of which are not scraped here.
+defaultRules:
+  create: false
+
+# No metrics about the nodes' CPUs, memory and disks.
+nodeExporter:
+  enabled: false
+
+# No scraping of the API server, the kubelets, etcd, the scheduler, the
+# controller manager, kube-proxy or CoreDNS. None of it is needed to watch one
+# service, and on a kind cluster several of these listen on the node's
+# loopback address only, where Prometheus cannot reach them.
+kubernetesServiceMonitors:
+  enabled: false
+
+prometheusOperator:
+  # The operator can refuse a malformed PrometheusRule at the moment it is
+  # created, through an admission webhook. The webhook needs a certificate,
+  # which the chart makes with two Jobs on every install and upgrade: more
+  # moving parts than a test cluster is worth. Without that certificate the
+  # operator's own endpoint cannot serve TLS either.
+  admissionWebhooks:
+    enabled: false
+  tls:
+    enabled: false
+  # A Service that lists the kubelets, for the scraping that is switched off above.
+  kubeletService:
+    enabled: false
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+
+prometheus:
+  prometheusSpec:
+    # By default this Prometheus reads only the ServiceMonitors and
+    # PrometheusRules that carry the label of this chart's release. With these
+    # two settings it reads all of them, in every namespace, so the service's
+    # chart does not have to know what the monitoring release is called.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+
+grafana:
+  # The dashboards this chart ships are about the components that are not
+  # scraped here.
+  defaultDashboardsEnabled: false
+  sidecar:
+    datasources:
+      # There is no Alertmanager for a data source to point at.
+      alertmanager:
+        enabled: false
+    # For each of the two sidecars: the one that loads dashboards and the one
+    # that loads data sources.
+    resources:
+      requests:
+        cpu: 10m
+        memory: 96Mi
+  grafana.ini:
+    # Whoever can reach this Grafana may look at the dashboards without logging
+    # in, and change nothing. It has no address outside the cluster: reaching
+    # it takes the cluster's kubeconfig, which already allows far more.
+    auth.anonymous:
+      enabled: true
+      org_role: Viewer
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi
+
+kube-state-metrics:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
