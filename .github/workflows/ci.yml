@@ -13,6 +13,8 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Tool and image versions come from versions.env. Each job copies its NAME=value
+# lines into the environment of the steps that follow.
 jobs:
   python:
     name: ruff and pytest
@@ -22,9 +24,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Load the pinned versions
+        run: grep -E '^[A-Z][A-Z0-9_]*=' versions.env >> "$GITHUB_ENV"
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: "3.13"
+          python-version: ${{ env.PYTHON_VERSION }}
       - name: Install the locked dependencies
         run: python -m pip install --require-hashes -r requirements-dev.txt
       - name: Lint
@@ -36,16 +40,28 @@ jobs:
       - name: Coverage floor
         run: coverage report
 
-  actionlint:
-    name: actionlint
+  lint:
+    name: actionlint and pins
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Load the pinned versions
+        run: grep -E '^[A-Z][A-Z0-9_]*=' versions.env >> "$GITHUB_ENV"
       - name: Lint the workflows
         run: >
           docker run --rm --volume "$PWD:/repo:ro" --workdir /repo
-          rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
-          -color
+          "$ACTIONLINT_IMAGE" -color
+      # The two steps below each print the lines that break the rule, if any.
+      - name: Check that every image in versions.env is pinned by digest
+        run: |
+          if grep -E '^[A-Z0-9_]+_IMAGE=' versions.env | grep -Ev '@sha256:[0-9a-f]{64}$'; then
+            exit 1
+          fi
+      - name: Check that every action is pinned to a commit SHA
+        run: |
+          if grep -rnE '^[[:space:]]*(- )?uses:' .github/workflows | grep -Ev 'uses: [^@ ]+@[0-9a-f]{40}( |$)'; then
+            exit 1
+          fi
