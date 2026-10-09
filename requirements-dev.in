@@ -1,0 +1,11 @@
+# The service's dependencies plus the test and lint tools. requirements-dev.txt
+# is the lock file generated from this; the constraint keeps the service's
+# dependencies at exactly the versions locked in requirements.txt.
+-r requirements.in
+-c requirements.txt
+coverage
+httpx
+pytest
+pytest-asyncio
+pytest-timeout
+ruff

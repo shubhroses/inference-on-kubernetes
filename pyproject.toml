@@ -1,0 +1,34 @@
+# Tool configuration only. Dependencies are locked in requirements.txt and
+# requirements-dev.txt.
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.ruff.lint]
+# pycodestyle, pyflakes, import order, bugbear, pyupgrade, simplify, async
+# pitfalls, pytest style, bandit's security checks and ruff's own rules.
+select = ["E", "W", "F", "I", "B", "UP", "SIM", "ASYNC", "PT", "S", "RUF"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests assert. They also poll the service from outside in a loop, because a
+# test that only sees HTTP responses has no event to wait on.
+"tests/*" = ["S101", "ASYNC110"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"
+addopts = "-ra --strict-markers --strict-config"
+filterwarnings = ["error"]
+# Seconds per test (pytest-timeout). The whole suite takes a few seconds; this
+# turns a test that waits forever into a failure with a traceback.
+timeout = 60
+
+[tool.coverage.run]
+source = ["app"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 95
+show_missing = true

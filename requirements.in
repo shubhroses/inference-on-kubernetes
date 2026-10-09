@@ -1,0 +1,4 @@
+# What the service imports. requirements.txt is the lock file generated from this.
+fastapi
+prometheus-client
+uvicorn
