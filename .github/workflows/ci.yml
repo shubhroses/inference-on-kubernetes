@@ -77,3 +77,37 @@ jobs:
             grep -n '^FROM' Dockerfile
             exit 1
           fi
+
+  image:
+    name: hadolint, docker build and trivy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      IMAGE: inference-on-kubernetes:${{ github.sha }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Load the pinned versions
+        run: grep -E '^[A-Z][A-Z0-9_]*=' versions.env >> "$GITHUB_ENV"
+      - name: Lint the Dockerfile
+        run: docker run --rm --interactive "$HADOLINT_IMAGE" < Dockerfile
+      - name: Build the image
+        run: docker build --build-arg GIT_SHA="$GITHUB_SHA" --tag "$IMAGE" .
+      - name: Check that the image has the Python version the unit tests ran on
+        run: |
+          in_image=$(docker run --rm "$IMAGE" python --version)
+          echo "In the image: $in_image. In versions.env: Python $PYTHON_VERSION."
+          test "$in_image" = "Python $PYTHON_VERSION"
+      - name: Run the image as non-root on a read-only root filesystem
+        run: scripts/test-image.sh "$IMAGE" "$GITHUB_SHA"
+      # The scanner runs in a container that is given the image as a file and
+      # nothing else: not the Docker socket, not the checkout. --ignore-unfixed
+      # leaves out findings for which no fixed version has been published,
+      # since there is nothing to upgrade to.
+      - name: Scan the image, failing on High or Critical findings that have a fix
+        run: |
+          docker save --output "$RUNNER_TEMP/image.tar" "$IMAGE"
+          docker run --rm --volume "$RUNNER_TEMP/image.tar:/image.tar:ro" "$TRIVY_IMAGE" image \
+            --input /image.tar --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed \
+            --exit-code 1 --no-progress
