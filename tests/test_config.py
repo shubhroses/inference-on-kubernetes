@@ -10,6 +10,7 @@ def test_defaults_apply_when_nothing_is_set():
 
     assert settings == Settings()
     assert (settings.model_slots, settings.queue_size) == (8, 16)
+    assert settings.keep_alive_seconds == 5
     assert settings.fault_injection is False
     assert settings.git_sha == "unknown"
 
@@ -21,6 +22,7 @@ def test_every_setting_can_come_from_the_environment():
             "QUEUE_SIZE": "0",
             "MODEL_INFER_SECONDS": "0.25",
             "MODEL_LOAD_SECONDS": "5",
+            "KEEP_ALIVE_SECONDS": "15",
             "FAULT_INJECTION": "true",
             "GIT_SHA": "0123abc",
             "HOST": "127.0.0.1",
@@ -33,6 +35,7 @@ def test_every_setting_can_come_from_the_environment():
         queue_size=0,
         model_infer_seconds=0.25,
         model_load_seconds=5.0,
+        keep_alive_seconds=15,
         fault_injection=True,
         git_sha="0123abc",
         host="127.0.0.1",
@@ -61,6 +64,7 @@ def test_fault_injection_is_a_strict_switch(value: str, enabled: bool):
         ("FAULT_INJECTION", ""),
         ("MODEL_SLOTS", "eight"),
         ("MODEL_INFER_SECONDS", "fast"),
+        ("KEEP_ALIVE_SECONDS", "2.5"),
         ("PORT", ""),
     ],
 )
@@ -76,6 +80,7 @@ def test_a_value_that_does_not_parse_is_reported_with_its_variable(variable: str
         ("QUEUE_SIZE", "-1"),
         ("MODEL_INFER_SECONDS", "-0.1"),
         ("MODEL_LOAD_SECONDS", "-1"),
+        ("KEEP_ALIVE_SECONDS", "0"),
     ],
 )
 def test_values_that_make_no_sense_are_refused(variable: str, value: str):

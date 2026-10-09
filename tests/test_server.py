@@ -3,9 +3,7 @@
 import asyncio
 import os
 import signal
-import socket
 import sys
-from pathlib import Path
 
 import httpx
 import pytest
@@ -13,25 +11,47 @@ import pytest
 from app.api import create_app
 from app.config import Settings
 from app.server import DrainingServer
-from tests.helpers import PATIENCE_SECONDS, POLL_SECONDS, Gate, Service, until
+from tests.helpers import (
+    PATIENCE_SECONDS,
+    POLL_SECONDS,
+    REPOSITORY,
+    Gate,
+    Service,
+    free_port,
+    until,
+)
 
-REPOSITORY = Path(__file__).parent.parent
+# Longer than any wait in the test below, so that no connection idles out by
+# itself while the test is looking at what the drain does to it.
+KEEP_ALIVE_SECONDS = 2 * PATIENCE_SECONDS
 
 
-async def test_a_drain_refuses_new_connections_and_finishes_the_requests_it_has(gate: Gate):
+async def test_a_drain_stops_listening_retires_open_connections_and_finishes_its_requests(
+    gate: Gate,
+):
     gate.open()  # lets the model load
+    lame_duck = Gate()  # the server waits here where it would sleep through the lame duck
     app = create_app(Settings(model_slots=1, queue_size=1), sleep=gate)
-    server = DrainingServer(app, host="127.0.0.1", port=0)
+    server = DrainingServer(app, "127.0.0.1", 0, KEEP_ALIVE_SECONDS, sleep=lame_duck)
+    assert server.config.timeout_keep_alive == KEEP_ALIVE_SECONDS
     serving = asyncio.create_task(server.serve())
     await until(lambda: server.started)
     listener = server.servers[0]
     port = listener.sockets[0].getsockname()[1]
 
     address = f"http://127.0.0.1:{port}"
-    async with httpx.AsyncClient(base_url=address, timeout=PATIENCE_SECONDS) as http:
+    never_expire = httpx.Limits(keepalive_expiry=None)
+    async with (
+        httpx.AsyncClient(base_url=address, timeout=PATIENCE_SECONDS) as http,
+        httpx.AsyncClient(base_url=address, timeout=PATIENCE_SECONDS, limits=never_expire) as other,
+    ):
         service = Service(http)
         await service.wait_until_ready()
         gate.close()
+        # Two more clients, each with a connection open before the drain begins:
+        # one that has been answered and is kept alive, one that is never used.
+        assert "connection" not in (await other.get("/healthz")).headers
+        unused, unused_writer = await asyncio.open_connection("127.0.0.1", port)
         running = service.infer()
         await service.wait_for(in_flight=1, queued=0)
         waiting = service.infer()
@@ -40,10 +60,28 @@ async def test_a_drain_refuses_new_connections_and_finishes_the_requests_it_has(
         # Call the signal handler directly: a real SIGTERM would also reach pytest.
         server.handle_exit(signal.SIGTERM, None)
 
+        # The server stops listening and begins the lame duck.
         await until(lambda: not listener.is_serving())
         assert app.state.draining
         with pytest.raises(ConnectionRefusedError):
             await asyncio.open_connection("127.0.0.1", port)
+        assert lame_duck.requested == [KEEP_ALIVE_SECONDS]
+
+        # A connection that was open is still served, and told to close. Had the
+        # server closed it, the client would have needed a new one and been refused.
+        answer = await other.get("/readyz")
+        assert (answer.status_code, answer.json()) == (503, {"status": "draining"})
+        assert answer.headers["connection"] == "close"
+        assert not unused.at_eof()
+        assert not running.done()
+        assert not waiting.done()
+
+        # The lame duck ends: the connection nobody used is closed, and the
+        # requests the server had accepted are still answered.
+        lame_duck.open()
+        assert await asyncio.wait_for(unused.read(), PATIENCE_SECONDS) == b""
+        unused_writer.close()
+        await unused_writer.wait_closed()
         assert not running.done()
         assert not waiting.done()
 
@@ -55,12 +93,6 @@ async def test_a_drain_refuses_new_connections_and_finishes_the_requests_it_has(
     await asyncio.wait_for(serving, PATIENCE_SECONDS)
 
 
-def free_port() -> int:
-    with socket.socket() as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
-
-
 async def test_the_process_answers_its_request_and_exits_with_status_0_on_sigterm():
     port = free_port()
     environment = os.environ | {
@@ -68,6 +100,7 @@ async def test_the_process_answers_its_request_and_exits_with_status_0_on_sigter
         "PORT": str(port),
         "MODEL_LOAD_SECONDS": "0",
         "MODEL_INFER_SECONDS": "1",
+        "KEEP_ALIVE_SECONDS": "1",  # the shortest lame duck there is: this one is slept through
     }
     process = await asyncio.create_subprocess_exec(
         sys.executable, "-m", "app", cwd=REPOSITORY, env=environment

@@ -19,6 +19,7 @@ _PARSERS: dict[str, Callable[[str], object]] = {
     "QUEUE_SIZE": int,
     "MODEL_INFER_SECONDS": float,
     "MODEL_LOAD_SECONDS": float,
+    "KEEP_ALIVE_SECONDS": int,
     "FAULT_INJECTION": _flag,
     "GIT_SHA": str,
     "HOST": str,
@@ -32,6 +33,10 @@ class Settings:
     queue_size: int = 16  # requests that may wait for a slot; any more get a 429
     model_infer_seconds: float = 0.1  # how long the stand-in model holds a slot
     model_load_seconds: float = 2.0  # how long the simulated model load takes
+    # How long an idle connection is kept open for its client's next request.
+    # A stopping server gives its open connections this long as well; see
+    # app/server.py. Whole seconds, because that is what uvicorn takes.
+    keep_alive_seconds: int = 5
     fault_injection: bool = False  # test only: honour the fail and delay parameters
     git_sha: str = "unknown"  # reported by the build-info metric
     # All interfaces, because the kubelet and other pods reach a container
@@ -46,6 +51,8 @@ class Settings:
             raise ValueError("QUEUE_SIZE must not be negative")
         if self.model_infer_seconds < 0 or self.model_load_seconds < 0:
             raise ValueError("MODEL_INFER_SECONDS and MODEL_LOAD_SECONDS must not be negative")
+        if self.keep_alive_seconds < 1:
+            raise ValueError("KEEP_ALIVE_SECONDS must be at least 1")
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "Settings":

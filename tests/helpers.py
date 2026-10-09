@@ -6,8 +6,10 @@ condition, never for a fixed time.
 """
 
 import asyncio
+import socket
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import httpx
 from fastapi import FastAPI
@@ -21,12 +23,22 @@ from app.config import Settings
 PATIENCE_SECONDS = 30
 POLL_SECONDS = 0.005
 
+# Where `python -m app` and `python -m loadgen` are started from.
+REPOSITORY = Path(__file__).parent.parent
+
 
 async def until(condition: Callable[[], bool]) -> None:
     """Let the event loop run until `condition` holds."""
     async with asyncio.timeout(PATIENCE_SECONDS):
         while not condition():
             await asyncio.sleep(POLL_SECONDS)
+
+
+def free_port() -> int:
+    """A port on the loopback interface that nothing is listening on."""
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return probe.getsockname()[1]
 
 
 class Gate:

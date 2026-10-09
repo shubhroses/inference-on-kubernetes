@@ -73,9 +73,12 @@ user_id=$(docker exec "$container" stat --format %u /proc/1)
 [ "$user_id" != 0 ] || fail "the service runs as root"
 echo "ok: the service runs as user $user_id"
 
-# `docker stop` sends SIGTERM and, 10 seconds later, SIGKILL. Status 0 means the
-# service drained and exited by itself; 137 would mean it had to be killed.
-docker stop "$container" >/dev/null
+# `docker stop` sends SIGTERM and, if the container is still there 30 seconds
+# later, SIGKILL: the time the chart gives a pod. The service spends five of
+# them on its drain, keeping open connections alive while it tells them to
+# close. Status 0 means that it drained and exited by itself; 137 would mean
+# that it had to be killed. (-t is --timeout, which older Dockers call --time.)
+docker stop -t 30 "$container" >/dev/null
 exit_status=$(docker inspect --format '{{.State.ExitCode}}' "$container")
 [ "$exit_status" = 0 ] || fail "exit status $exit_status after SIGTERM, expected 0"
 echo "ok: SIGTERM ends the service with exit status 0"
