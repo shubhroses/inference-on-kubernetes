@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    {{- include "inference.labels" . | nindent 4 }}
+spec:
+  # Reachable from inside the cluster only, which is where the clients are.
+  type: ClusterIP
+  selector:
+    {{- include "inference.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http

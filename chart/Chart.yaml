@@ -1,0 +1,9 @@
+apiVersion: v2
+name: inference
+description: >-
+  An inference-style HTTP API. The "model" is a stand-in that holds a slot for
+  a configurable time; there is no real model and no GPU.
+type: application
+# The version of the chart itself. Which build of the service runs is chosen
+# at install time with image.tag, so the chart has no appVersion.
+version: 0.1.0

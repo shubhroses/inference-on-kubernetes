@@ -1,0 +1,46 @@
+# Defaults, shaped for a real cluster. values-kind.yaml holds what the test
+# cluster changes.
+
+# Pods serving requests.
+replicaCount: 2
+
+image:
+  # The name `make image` gives the image it builds. This project publishes no
+  # image: for a real cluster, push your build to a registry the cluster can
+  # pull from and put its path here.
+  repository: inference-on-kubernetes
+  # Required: the build to run. `make up` passes the commit the image was
+  # built from. There is no default, because no single tag would be right.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# The stand-in model's settings, handed to the service as environment variables.
+model:
+  # Requests one pod serves at the same time.
+  slots: 8
+  # Requests one pod lets wait for a slot. Any more are answered with 429.
+  queueSize: 16
+  # Seconds the stand-in holds a slot for one request.
+  inferSeconds: 0.1
+  # Seconds the simulated model load takes when a pod starts. The pod is not
+  # Ready, and so gets no requests, until it is over.
+  loadSeconds: 2
+
+service:
+  # The port clients inside the cluster connect to.
+  port: 80
+
+# Measured on a laptop with the defaults above: a pod uses about 40 MiB of
+# memory, and about a tenth of a core when all eight slots are busy.
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    # The service is one process with one event loop, so it cannot use more
+    # than one core. The limit states that ceiling; it does not squeeze the
+    # service below what it could use.
+    cpu: "1"
+    # Equal to the request. Memory cannot be throttled the way CPU can, so the
+    # scheduler sets aside all that the container is allowed to use.
+    memory: 128Mi

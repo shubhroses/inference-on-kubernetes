@@ -1,0 +1,9 @@
+# What the kind cluster made by `make up` changes. Everything not named here
+# keeps its default from values.yaml, so the tests run the chart as it ships.
+
+image:
+  # `make up` builds the image and copies it onto the nodes; there is no
+  # registry to pull it from. Never makes a missing image an immediate error
+  # that names the cause (ErrImageNeverPull), where the default would first
+  # try to pull the name from Docker Hub.
+  pullPolicy: Never

@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    {{- include "inference.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "inference.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "inference.selectorLabels" . | nindent 8 }}
+    spec:
+      # The service never calls the Kubernetes API, so it is given no token for it.
+      automountServiceAccountToken: false
+      # This block and the container's securityContext below together meet the
+      # "restricted" Pod Security Standard. They are written out here and not
+      # taken from values, because there is no setting under which the service
+      # needs more than this. The user and group are the ones the image runs as.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: inference
+          image: "{{ .Values.image.repository }}:{{ required "image.tag is required: set it to the tag of the build to run" .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # GIT_SHA is deliberately not set here: the image carries the commit
+          # it was built from, and that is what the build-info metric reports.
+          env:
+            - name: MODEL_SLOTS
+              value: {{ .Values.model.slots | int | quote }}
+            - name: QUEUE_SIZE
+              value: {{ .Values.model.queueSize | int | quote }}
+            - name: MODEL_INFER_SECONDS
+              value: {{ .Values.model.inferSeconds | quote }}
+            - name: MODEL_LOAD_SECONDS
+              value: {{ .Values.model.loadSeconds | quote }}
+          ports:
+            - name: http
+              containerPort: 8000
+          # Startup: gives the model up to a minute to load (30 tries, 2 seconds
+          # apart). The other two probes do not run until this one has succeeded,
+          # so a slow load is never mistaken for a hung process.
+          startupProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 2
+            failureThreshold: 30
+          # Readiness: decides whether the Service sends this pod requests.
+          # /readyz says no while the model loads and while the pod drains. It
+          # keeps saying yes when every slot is busy: a full pod answers 429 by
+          # itself, and taking it out of the Service would only move its load
+          # onto the others.
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+          # Liveness: decides whether to restart the container. /healthz answers
+          # as long as the event loop is turning, whatever the model is doing,
+          # so a pod is never restarted for being busy, loading or draining.
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            # The service writes no files, so nothing in the container is writable.
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
