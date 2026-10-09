@@ -4,4 +4,4 @@ An inference-style HTTP API that will be run on Kubernetes the way a production 
 
 The "model" is a stand-in that holds a slot for a configurable time and returns a small JSON result; there is no real model and no GPU here.
 
-Under construction: so far there is the service (`app/`) with its unit tests, and its container image (`Dockerfile`). The chart, the cluster tests and the full README are still to come.
+Under construction: so far there is the service (`app/`) with its unit tests, its container image (`Dockerfile`), a Helm chart (`chart/`), and a smoke test (`e2e/`) that GitHub Actions runs against the chart installed on a kind cluster. Monitoring, alerts, autoscaling, the rollout tests and the full README are still to come.
