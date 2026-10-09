@@ -27,15 +27,19 @@ JOB = Path(__file__).with_name("loadgen-job.yaml")
 REPORTS = REPOSITORY / "reports"
 
 # The load of the rollout and the drain test. Half of the requests go over the
-# kept connections, half over a new connection each.
+# kept connections, half over a new connection each. The alert test sends at
+# the same rate, for as long as it needs.
 RATE = 20  # requests per second
 SECONDS = 90
 REQUESTS = RATE * SECONDS
 KEPT_CONNECTIONS = 8
 
 
-def start(test: str) -> str:
-    """Start the load. Returns the Job's name, once the load is under way."""
+def start(test: str, *, seconds: int = SECONDS, fail_ratio: float = 0) -> str:
+    """Start the load. Returns the Job's name, once the load is under way.
+
+    With `fail_ratio`, that share of the requests asks the service to fail.
+    """
     job = f"load-{test}"
     # The source travels as a ConfigMap, which the Job mounts into a pod of
     # the service's image. `create --dry-run` only writes the ConfigMap down;
@@ -53,8 +57,9 @@ def start(test: str) -> str:
     arguments = [
         f"--url={SERVICE_URL}/v1/infer",
         f"--rate={RATE}",
-        f"--seconds={SECONDS}",
+        f"--seconds={seconds}",
         f"--connections={KEPT_CONNECTIONS}",
+        f"--fail-ratio={fail_ratio}",
     ]
     manifest = string.Template(JOB.read_text()).substitute(
         name=job,
@@ -80,6 +85,20 @@ def is_running(job: str) -> bool:
     return active == "1"
 
 
+def progress(job: str) -> tuple[int, int]:
+    """How many requests the load has sent, and how many have failed, by its latest report."""
+    log = kubectl("logs", f"job/{job}", IN_CLIENT_NAMESPACE)
+    sent, failed = re.findall(r"(\d+) requests sent, (\d+) failed", log)[-1]
+    return int(sent), int(failed)
+
+
+def stop(job: str) -> None:
+    """End a load before its time is up. Returns when its pod is gone, and its requests with it."""
+    # Deleting a Job leaves its pod to be cleaned up afterwards. In the
+    # foreground, the Job is gone only when the pod is.
+    kubectl("delete", "job", job, IN_CLIENT_NAMESPACE, "--cascade=foreground", timeout=120)
+
+
 def summary(job: str) -> dict[str, Any]:
     """Wait for the load to end. Returns the load generator's summary of the run."""
 
@@ -96,8 +115,11 @@ def summary(job: str) -> dict[str, Any]:
     return json.loads(log.splitlines()[-1])
 
 
-def save_report(name: str, title: str, load: dict[str, Any], notes: list[str]) -> None:
-    """Keep what a test measured, whether or not the test goes on to pass."""
+def save_report(name: str, title: str, load: dict[str, Any] | None, notes: list[str]) -> None:
+    """Keep what a test measured, whether or not the test goes on to pass.
+
+    `load` is the load generator's summary of a run, if the test has one.
+    """
     REPORTS.mkdir(exist_ok=True)
     report = {"test": title, "load": load, "notes": notes}
     (REPORTS / f"{name}.json").write_text(json.dumps(report, indent=2) + "\n")

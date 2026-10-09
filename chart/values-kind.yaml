@@ -7,3 +7,27 @@ image:
   # that names the cause (ErrImageNeverPull), where the default would first
   # try to pull the name from Docker Hub.
   pullPolicy: Never
+
+# The alert test makes requests fail on purpose, with the fault parameter.
+faultInjection: true
+
+metrics:
+  # A window has to hold several scrapes before a rate can be worked out over
+  # it. Scraping this often is what makes windows of seconds possible.
+  scrapeInterval: 5s
+
+# The alert test cannot wait an hour for a page. Here each hour of a long
+# window is two minutes, and each short window is six scrapes or more. With
+# 30% of the requests failing, the page fires after about a minute and clears
+# half a minute after they stop (tests/rules/kind.test.yaml). The thresholds
+# stay as they are. So this cluster shows that the rules reach Prometheus and
+# that an alert follows the traffic; when the alerts fire with their real
+# windows is tested in tests/rules/production.test.yaml.
+alerts:
+  evaluationInterval: 5s
+  fastBurn:
+    longWindow: 2m
+    shortWindow: 30s
+  slowBurn:
+    longWindow: 12m
+    shortWindow: 3m

@@ -17,6 +17,10 @@ spec:
     spec:
       restartPolicy: Never
       automountServiceAccountToken: false
+      # A test that ends the load early deletes the Job. The load generator
+      # takes no notice of the SIGTERM that follows, so it is given one
+      # second, not the usual thirty, before it is killed.
+      terminationGracePeriodSeconds: 1
       # On the control-plane node, the one node the tests never drain, so that
       # the load keeps coming whichever worker is being emptied. The toleration
       # lets the pod past the taint that keeps other pods off that node.

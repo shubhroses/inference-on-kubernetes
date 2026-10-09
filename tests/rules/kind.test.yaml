@@ -1,0 +1,59 @@
+# The same rules with the short windows of chart/values-kind.yaml, as the kind
+# cluster gets them: 2 min and 30 s for the page, where a real cluster has 1 h
+# and 5 min.
+#
+# The end-to-end alert test makes 30% of the requests fail and gives the page
+# three minutes to fire, then three minutes to clear. This test works out how
+# much of that the rules themselves need, so that a change to those windows
+# which would leave the end-to-end test no room fails here, in seconds and
+# without a cluster. By the arithmetic in production.test.yaml:
+#
+#     fires    14.4% x 120 s / 30%      =  57.6 s after the failures begin
+#     clears   30 s x (1 - 14.4% / 30%) =  15.6 s after they stop
+#
+# In the cluster a scrape and an evaluation, 5 s each, come on top of both.
+
+rule_files:
+  - kind.rules.yaml
+
+evaluation_interval: 5s
+
+tests:
+  - name: With the kind cluster's windows, 30% failing requests fire the page in about a minute and it clears in half a minute
+    interval: 5s
+    input_series:
+      # 100 requests every 5 s, which is 20 a second: two minutes of successes,
+      # three minutes in which 30 of each 100 fail, then successes again.
+      - series: 'inference_requests_total{namespace="inference", job="inference", pod="a", outcome="ok"}'
+        values: '0+100x24 2470+70x35 5020+100x11'
+      - series: 'inference_requests_total{namespace="inference", job="inference", pod="a", outcome="error"}'
+        values: '0x24 30+30x35 1080x11'
+    alert_rule_test:
+      # 45 s and 70 s after the failures begin.
+      - eval_time: 2m45s
+        alertname: InferenceErrorBudgetFastBurn
+        exp_alerts: []
+      - eval_time: 3m10s
+        alertname: InferenceErrorBudgetFastBurn
+        exp_alerts: &page
+          - exp_labels:
+              severity: page
+              namespace: inference
+              job: inference
+              window: 2m
+            exp_annotations:
+              summary: Requests are failing 14.4 times faster than the objective of 0.99 allows.
+              description: >-
+                The share of requests answered with a 5xx or shed with a 429 has
+                been more than 14.4 times the error budget over the last 2m and
+                over the last 30s.
+      # The last failures, then 5 s and 30 s after them.
+      - eval_time: 5m
+        alertname: InferenceErrorBudgetFastBurn
+        exp_alerts: *page
+      - eval_time: 5m5s
+        alertname: InferenceErrorBudgetFastBurn
+        exp_alerts: *page
+      - eval_time: 5m30s
+        alertname: InferenceErrorBudgetFastBurn
+        exp_alerts: []

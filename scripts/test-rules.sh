@@ -48,4 +48,4 @@ cp tests/rules/*.test.yaml "$work"
 # off there.
 promtool check rules --lint-fatal production.rules.yaml kind.rules.yaml
 
-promtool test rules production.test.yaml
+promtool test rules production.test.yaml kind.test.yaml

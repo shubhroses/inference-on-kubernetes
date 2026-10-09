@@ -1,7 +1,8 @@
-"""Prints what the load tests measured as Markdown: `python -m e2e.summary`.
+"""Prints what the tests measured as Markdown: `python -m e2e.summary`.
 
-CI appends it to the job summary. The tests leave one file per load run in
-reports/; see save_report in e2e/load.py.
+CI appends it to the job summary. The tests leave one file each in reports/;
+see save_report in e2e/load.py. A test that ran a load to its end has a row in
+the table, and every test has its notes below it.
 """
 
 import json
@@ -18,21 +19,22 @@ def milliseconds(seconds: float | None) -> str:
 def main() -> None:
     reports = [json.loads(path.read_text()) for path in sorted(REPORTS.glob("*.json"))]
     if not reports:
-        print("No load test got far enough to report.")
+        print("No test got far enough to report.")
         return
     print("| Test | Requests | Failed | " + " | ".join(PERCENTILES) + " |")
     print("|---|---|---|---|---|---|---|")
     for report in reports:
-        load = report["load"]
-        latency = [milliseconds(load["latency_seconds"][key]) for key in PERCENTILES]
-        cells = [report["test"], load["requests"], load["failures"], *latency]
-        print("| " + " | ".join(map(str, cells)) + " |")
+        if load := report["load"]:
+            latency = [milliseconds(load["latency_seconds"][key]) for key in PERCENTILES]
+            cells = [report["test"], load["requests"], load["failures"], *latency]
+            print("| " + " | ".join(map(str, cells)) + " |")
     print()
     for report in reports:
         for note in report["notes"]:
             print(f"- {report['test']}: {note}")
-        for error, count in report["load"]["errors"].items():
-            print(f"- {report['test']}: {count} requests failed on a {error}")
+        if load := report["load"]:
+            for error, count in load["errors"].items():
+                print(f"- {report['test']}: {count} requests failed on a {error}")
 
 
 if __name__ == "__main__":
