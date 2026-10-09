@@ -55,12 +55,13 @@ jobs:
           docker run --rm --volume "$PWD:/repo:ro" --workdir /repo
           "$ACTIONLINT_IMAGE" -color
       # The actionlint image carries shellcheck, which it runs on the workflows'
-      # `run:` steps. The same binary lints the scripts.
+      # `run:` steps. The same binary lints the scripts. --external-sources lets
+      # it read versions.env where a script sources it.
       - name: Lint the shell scripts
         run: >
           docker run --rm --volume "$PWD:/repo:ro" --workdir /repo --entrypoint shellcheck
-          "$ACTIONLINT_IMAGE" scripts/*.sh
-      # The three steps below each print the lines that break the rule, if any.
+          "$ACTIONLINT_IMAGE" --external-sources scripts/*.sh
+      # The four steps below each print the lines that break the rule, if any.
       - name: Check that every image in versions.env is pinned by digest
         run: |
           if grep -E '^[A-Z0-9_]+_IMAGE=' versions.env | grep -Ev '@sha256:[0-9a-f]{64}$'; then
@@ -77,6 +78,49 @@ jobs:
             grep -n '^FROM' Dockerfile
             exit 1
           fi
+      - name: Check that the kind node image is the Kubernetes version in versions.env
+        run: |
+          if ! echo "$KIND_NODE_IMAGE" | grep --fixed-strings ":v${KUBERNETES_VERSION}@sha256:"; then
+            grep -E '^(KUBERNETES_VERSION|KIND_NODE_IMAGE)=' versions.env
+            exit 1
+          fi
+
+  chart:
+    name: helm lint and kubeconform
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Load the pinned versions
+        run: grep -E '^[A-Z][A-Z0-9_]*=' versions.env >> "$GITHUB_ENV"
+      - name: Install helm at the pinned version
+        run: |
+          scripts/install-tools.sh "$RUNNER_TEMP/bin" helm
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      # Both steps run twice: with the chart's defaults, and with what the kind
+      # cluster changes. image.tag has no default, so it is given here.
+      - name: Lint the chart
+        run: |
+          helm version --short | grep --fixed-strings "v$HELM_VERSION+"
+          helm lint --strict chart --set-string image.tag="$GITHUB_SHA"
+          helm lint --strict chart --values chart/values-kind.yaml --set-string image.tag="$GITHUB_SHA"
+      # kubeconform checks each rendered object against the API schema of the
+      # Kubernetes version the test cluster runs, so a misspelt field or a value
+      # of the wrong type fails here, without a cluster. pipefail makes a
+      # failing `helm template` fail the step, where it would otherwise hand
+      # kubeconform an empty input to approve.
+      - name: Validate the rendered manifests against the Kubernetes API schemas
+        run: |
+          set -o pipefail
+          for values in chart/values.yaml chart/values-kind.yaml; do
+            echo "With $values:"
+            helm template inference chart --namespace inference --values "$values" \
+              --set-string image.tag="$GITHUB_SHA" |
+              docker run --rm --interactive "$KUBECONFORM_IMAGE" \
+                -strict -verbose -summary -kubernetes-version "$KUBERNETES_VERSION" -
+          done
 
   image:
     name: hadolint, docker build and trivy
