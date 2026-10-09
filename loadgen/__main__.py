@@ -37,10 +37,19 @@ parser.add_argument(
     default=10.0,
     help="seconds after which an unanswered request has failed (default: 10)",
 )
+parser.add_argument(
+    "--fail-ratio",
+    type=float,
+    default=0.0,
+    help="share of the requests, from 0 to 1, that ask the service to fail; it does so only"
+    " with its fault injection switched on (default: 0)",
+)
 
 arguments = parser.parse_args()
 if arguments.connections < 1:
     # Every other request waits for one of these clients to take it.
     parser.error("--connections has to be at least 1")
+if not 0 <= arguments.fail_ratio <= 1:
+    parser.error("--fail-ratio has to be between 0 and 1")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
 print(json.dumps(asyncio.run(run(**vars(arguments)))))

@@ -59,6 +59,8 @@ spec:
               value: {{ .Values.model.loadSeconds | quote }}
             - name: KEEP_ALIVE_SECONDS
               value: {{ .Values.termination.keepAliveSeconds | int | quote }}
+            - name: FAULT_INJECTION
+              value: {{ .Values.faultInjection | quote }}
           ports:
             - name: http
               containerPort: 8000

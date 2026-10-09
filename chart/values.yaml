@@ -30,6 +30,12 @@ model:
   # Ready, and so gets no requests, until it is over.
   loadSeconds: 2
 
+# The test flag. On, a request can ask to fail (?fail=true) or to take longer
+# (?delay=seconds), which is how a test produces errors on purpose. Off, the
+# service accepts both parameters and ignores them. Leave it off wherever
+# anyone but a test can reach the service.
+faultInjection: false
+
 service:
   # The port clients inside the cluster connect to.
   port: 80

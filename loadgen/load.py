@@ -19,6 +19,11 @@ still open before using it. A request fails if it gets anything but a 200:
 its connection is refused, reset or closed without an answer, the answer does
 not come within `request_timeout` seconds, or it has another status.
 
+With `fail_ratio`, that share of the requests, spread evenly over the run,
+asks the service to fail (`?fail=true`). The service does so, with a 500, only
+if its fault injection is switched on; such a request then counts as failed
+like any other.
+
 The name in the URL is resolved once, when the run begins. The load is about
 the pods behind the Service's address, not about the cluster's DNS.
 """
@@ -42,7 +47,14 @@ class Load:
     """Where the requests of one run go, and what has come back so far."""
 
     def __init__(
-        self, host: str, address: str, port: int, path: str, max_idle: float, request_timeout: float
+        self,
+        host: str,
+        address: str,
+        port: int,
+        path: str,
+        max_idle: float,
+        request_timeout: float,
+        fail_ratio: float,
     ) -> None:
         self.host = host  # as written in the URL: sent in the Host header
         self.address = address  # the IP address that name resolved to
@@ -50,6 +62,8 @@ class Load:
         self.path = path
         self.max_idle = max_idle
         self.request_timeout = request_timeout
+        self.fail_ratio = fail_ratio
+        self.begun = 0  # requests begun so far, answered or not
         self.latencies: list[float] = []  # seconds, one for each request answered with 200
         self.errors: Counter[str] = Counter()  # what went wrong, and how often
         self.opened = 0  # connections opened by the clients that keep theirs
@@ -64,6 +78,12 @@ class Load:
         """
         client = "kept connection" if keep else "new connection"
         loop = asyncio.get_running_loop()
+        # The fault parameter goes on each request with which the count of
+        # requests times `fail_ratio` reaches the next whole number: with 0.3,
+        # on the 4th, the 7th and the 10th of every ten.
+        self.begun += 1
+        asked_to_fail = int(self.begun * self.fail_ratio) > int((self.begun - 1) * self.fail_ratio)
+        path = self.path + "?fail=true" if asked_to_fail else self.path
         reusable = False
         try:
             async with asyncio.timeout(self.request_timeout):
@@ -71,7 +91,7 @@ class Load:
                     connection = await Connection.open(self.address, self.port)
                     if keep:
                         self.opened += 1
-                status, reusable = await connection.post(self.host, self.path, BODY, last=not keep)
+                status, reusable = await connection.post(self.host, path, BODY, last=not keep)
         except (OSError, EOFError, ValueError) as error:
             self.fail(f"{client}: {type(error).__name__}")
         else:
@@ -130,6 +150,7 @@ async def run(
     connections: int,
     max_idle: float,
     request_timeout: float,
+    fail_ratio: float,
 ) -> dict[str, object]:
     """Send `rate` requests a second to `url` for `seconds` seconds. Returns the summary."""
     loop = asyncio.get_running_loop()
@@ -137,7 +158,8 @@ async def run(
     port = parts.port or 80
     resolved = await loop.getaddrinfo(parts.hostname, port, type=socket.SOCK_STREAM)
     address = resolved[0][4][0]
-    load = Load(parts.netloc, address, port, parts.path or "/", max_idle, request_timeout)
+    path = parts.path or "/"
+    load = Load(parts.netloc, address, port, path, max_idle, request_timeout, fail_ratio)
     total = round(rate * seconds)
     progress_every = max(1, round(rate * PROGRESS_SECONDS))
     logger.info("sending %d requests to %s at %s, %g a second", total, url, address, rate)
