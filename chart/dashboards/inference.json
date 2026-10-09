@@ -1,0 +1,249 @@
+{
+  "uid": "inference",
+  "title": "Inference service",
+  "description": "Traffic, errors against the objective, latency, load against capacity and replicas of one release of the inference chart.",
+  "tags": ["inference"],
+  "schemaVersion": 42,
+  "editable": false,
+  "graphTooltip": 1,
+  "timezone": "browser",
+  "time": { "from": "now-30m", "to": "now" },
+  "refresh": "10s",
+  "templating": {
+    "list": [
+      {
+        "name": "namespace",
+        "label": "Namespace",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": "label_values(inference_build_info, namespace)",
+        "refresh": 2,
+        "sort": 1
+      },
+      {
+        "name": "release",
+        "label": "Release",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": "label_values(inference_build_info{namespace=\"$namespace\"}, job)",
+        "refresh": 2,
+        "sort": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Request rate by outcome",
+      "description": "Requests per second: ok, error (answered with a 5xx) or rejected (answered with a 429 because the queue was full).",
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (outcome) (rate(inference_requests_total{namespace=\"$namespace\", job=\"$release\"}[$__rate_interval]))",
+          "legendFormat": "{{outcome}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "reqps", "min": 0 },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "ok" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "green" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "rejected" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "orange" } }]
+          },
+          {
+            "matcher": { "id": "byName", "options": "error" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }]
+          }
+        ]
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull"] },
+        "tooltip": { "mode": "multi" }
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Error ratio against the SLO",
+      "description": "The share of requests over the last five minutes that were not answered successfully: errors and rejections both count. The objective is 99% success, so the dashed line at 1% is the most it allows.",
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(inference_requests_total{namespace=\"$namespace\", job=\"$release\", outcome!=\"ok\"}[5m])) / sum(rate(inference_requests_total{namespace=\"$namespace\", job=\"$release\"}[5m]))",
+          "legendFormat": "error ratio"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "custom": { "axisSoftMax": 0.02, "thresholdsStyle": { "mode": "dashed" } },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 0.01 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull"] },
+        "tooltip": { "mode": "multi" }
+      }
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Latency percentiles",
+      "description": "How long successful requests took from arrival to response, waiting for a slot included. Estimated from a histogram, so a value is only as fine as the bucket it falls in.",
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(inference_request_duration_seconds_bucket{namespace=\"$namespace\", job=\"$release\", outcome=\"ok\"}[$__rate_interval])))",
+          "legendFormat": "p50"
+        },
+        {
+          "refId": "B",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(inference_request_duration_seconds_bucket{namespace=\"$namespace\", job=\"$release\", outcome=\"ok\"}[$__rate_interval])))",
+          "legendFormat": "p95"
+        },
+        {
+          "refId": "C",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(inference_request_duration_seconds_bucket{namespace=\"$namespace\", job=\"$release\", outcome=\"ok\"}[$__rate_interval])))",
+          "legendFormat": "p99"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "s", "min": 0 },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull"] },
+        "tooltip": { "mode": "multi" }
+      }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "In-flight and queued against slots",
+      "description": "Requests holding a model slot and requests waiting for one, added up over the pods, next to the number of slots those pods have between them.",
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(inference_requests_in_flight{namespace=\"$namespace\", job=\"$release\"})",
+          "legendFormat": "in flight"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(inference_requests_queued{namespace=\"$namespace\", job=\"$release\"})",
+          "legendFormat": "queued"
+        },
+        {
+          "refId": "C",
+          "expr": "sum(inference_model_slots{namespace=\"$namespace\", job=\"$release\"})",
+          "legendFormat": "slots"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "min": 0, "decimals": 0 },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull"] },
+        "tooltip": { "mode": "multi" }
+      }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Replicas",
+      "description": "Pods the Deployment asks for and pods that are Ready, as kube-state-metrics reports them.",
+      "gridPos": { "x": 0, "y": 16, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max(kube_deployment_spec_replicas{namespace=\"$namespace\", deployment=\"$release\"})",
+          "legendFormat": "desired"
+        },
+        {
+          "refId": "B",
+          "expr": "max(kube_deployment_status_replicas_ready{namespace=\"$namespace\", deployment=\"$release\"})",
+          "legendFormat": "ready"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "none", "min": 0, "decimals": 0 },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull"] },
+        "tooltip": { "mode": "multi" }
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Burn rate",
+      "description": "How fast the error budget is being spent: the error ratio over each window divided by the 1% the objective allows. At the dashed line, 1, errors arrive exactly as fast as the objective tolerates.",
+      "gridPos": { "x": 12, "y": 16, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(inference_requests_total{namespace=\"$namespace\", job=\"$release\", outcome!=\"ok\"}[5m])) / sum(rate(inference_requests_total{namespace=\"$namespace\", job=\"$release\"}[5m])) / 0.01",
+          "legendFormat": "5m"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(inference_requests_total{namespace=\"$namespace\", job=\"$release\", outcome!=\"ok\"}[30m])) / sum(rate(inference_requests_total{namespace=\"$namespace\", job=\"$release\"}[30m])) / 0.01",
+          "legendFormat": "30m"
+        },
+        {
+          "refId": "C",
+          "expr": "sum(rate(inference_requests_total{namespace=\"$namespace\", job=\"$release\", outcome!=\"ok\"}[1h])) / sum(rate(inference_requests_total{namespace=\"$namespace\", job=\"$release\"}[1h])) / 0.01",
+          "legendFormat": "1h"
+        },
+        {
+          "refId": "D",
+          "expr": "sum(rate(inference_requests_total{namespace=\"$namespace\", job=\"$release\", outcome!=\"ok\"}[6h])) / sum(rate(inference_requests_total{namespace=\"$namespace\", job=\"$release\"}[6h])) / 0.01",
+          "legendFormat": "6h"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "min": 0,
+          "custom": { "axisSoftMax": 2, "thresholdsStyle": { "mode": "dashed" } },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right", "calcs": ["lastNotNull"] },
+        "tooltip": { "mode": "multi" }
+      }
+    }
+  ]
+}

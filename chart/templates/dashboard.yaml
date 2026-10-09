@@ -1,0 +1,17 @@
+# The Grafana dashboard, delivered as a ConfigMap. Grafana runs a sidecar
+# container that watches for ConfigMaps carrying the label below, in every
+# namespace, and hands the files in them to Grafana. So the dashboard arrives
+# with the chart and changes with it; nobody imports it by hand.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-dashboard
+  labels:
+    {{- include "inference.labels" . | nindent 4 }}
+    # The label and value the sidecar looks for unless it is configured otherwise.
+    grafana_dashboard: "1"
+data:
+  # The file is included as it is and not run through Helm's templating: the
+  # curly braces in it are Grafana's.
+  inference.json: |-
+    {{- .Files.Get "dashboards/inference.json" | nindent 4 }}
