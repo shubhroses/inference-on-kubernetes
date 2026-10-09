@@ -4,4 +4,4 @@ An inference-style HTTP API that will be run on Kubernetes the way a production 
 
 The "model" is a stand-in that holds a slot for a configurable time and returns a small JSON result; there is no real model and no GPU here.
 
-Under construction: so far there is only the service (`app/`) with its unit tests. The container image, the chart, the cluster tests and the full README are still to come.
+Under construction: so far there is the service (`app/`) with its unit tests, and its container image (`Dockerfile`). The chart, the cluster tests and the full README are still to come.

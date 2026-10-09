@@ -54,7 +54,7 @@ jobs:
         run: >
           docker run --rm --volume "$PWD:/repo:ro" --workdir /repo
           "$ACTIONLINT_IMAGE" -color
-      # The two steps below each print the lines that break the rule, if any.
+      # The three steps below each print the lines that break the rule, if any.
       - name: Check that every image in versions.env is pinned by digest
         run: |
           if grep -E '^[A-Z0-9_]+_IMAGE=' versions.env | grep -Ev '@sha256:[0-9a-f]{64}$'; then
@@ -63,5 +63,11 @@ jobs:
       - name: Check that every action is pinned to a commit SHA
         run: |
           if grep -rnE '^[[:space:]]*(- )?uses:' .github/workflows | grep -Ev 'uses: [^@ ]+@[0-9a-f]{40}( |$)'; then
+            exit 1
+          fi
+      - name: Check that the Dockerfile's base image is the one in versions.env
+        run: |
+          if ! grep --fixed-strings --line-regexp "FROM ${PYTHON_IMAGE} AS base" Dockerfile; then
+            grep -n '^FROM' Dockerfile
             exit 1
           fi

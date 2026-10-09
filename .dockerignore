@@ -1,0 +1,10 @@
+# An allow-list: nothing is sent to the builder except what the Dockerfile
+# copies. A file added to the repository later stays out of the build context,
+# and so out of the image, until it is named here.
+*
+!app/
+!requirements.txt
+
+# Compiled modules left behind by running the service or its tests locally.
+**/__pycache__/
+**/*.py[cod]
