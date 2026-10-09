@@ -1,0 +1,21 @@
+# Limits how many pods may be taken away at the same time on purpose: by a
+# node drain, a cluster upgrade or an autoscaler removing a node. Such removals
+# go through the eviction API, which refuses one that would break this budget.
+# It does not apply to rolling updates (the Deployment's maxUnavailable does)
+# and cannot help when a node simply fails.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    {{- include "inference.labels" . | nindent 4 }}
+spec:
+  # One pod at a time, however many replicas there are: the next eviction is
+  # allowed when the replacement of the last evicted pod is Ready.
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      {{- include "inference.selectorLabels" . | nindent 6 }}
+  # A pod that is not Ready serves nobody, so evicting it costs nothing. The
+  # default would count it against the budget and let it block a node drain.
+  unhealthyPodEvictionPolicy: AlwaysAllow

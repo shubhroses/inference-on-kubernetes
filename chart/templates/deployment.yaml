@@ -6,6 +6,13 @@ metadata:
     {{- include "inference.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.replicaCount }}
+  # A rolling update never has fewer Ready pods than `replicas`: a new pod has
+  # to be Ready before an old one is told to go, one pod at a time.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
   selector:
     matchLabels:
       {{- include "inference.selectorLabels" . | nindent 6 }}
@@ -13,7 +20,16 @@ spec:
     metadata:
       labels:
         {{- include "inference.selectorLabels" . | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
     spec:
+      # The time a pod has from being deleted to being killed: the three steps
+      # described under `termination` in values.yaml, added up.
+      {{- with .Values.termination }}
+      terminationGracePeriodSeconds: {{ add (int .preStopSeconds) (int .keepAliveSeconds) (int .requestSeconds) }}
+      {{- end }}
       # The service never calls the Kubernetes API, so it is given no token for it.
       automountServiceAccountToken: false
       # This block and the container's securityContext below together meet the
@@ -41,9 +57,20 @@ spec:
               value: {{ .Values.model.inferSeconds | quote }}
             - name: MODEL_LOAD_SECONDS
               value: {{ .Values.model.loadSeconds | quote }}
+            - name: KEEP_ALIVE_SECONDS
+              value: {{ .Values.termination.keepAliveSeconds | int | quote }}
           ports:
             - name: http
               containerPort: 8000
+          # Step 1 of the termination: the kubelet waits this long before it
+          # sends SIGTERM, and the service, which has not been told anything,
+          # goes on serving. Meanwhile the nodes stop routing new connections
+          # to this pod. The kubelet does the sleeping itself, so the image
+          # needs no `sleep` command.
+          lifecycle:
+            preStop:
+              sleep:
+                seconds: {{ .Values.termination.preStopSeconds | int }}
           # Startup: gives the model up to a minute to load (30 tries, 2 seconds
           # apart). The other two probes do not run until this one has succeeded,
           # so a slow load is never mistaken for a hung process.
@@ -54,10 +81,11 @@ spec:
             periodSeconds: 2
             failureThreshold: 30
           # Readiness: decides whether the Service sends this pod requests.
-          # /readyz says no while the model loads and while the pod drains. It
-          # keeps saying yes when every slot is busy: a full pod answers 429 by
-          # itself, and taking it out of the Service would only move its load
-          # onto the others.
+          # /readyz says no while the model loads. It keeps saying yes when
+          # every slot is busy: a full pod answers 429 by itself, and taking
+          # it out of the Service would only move its load onto the others.
+          # A pod that is being deleted leaves the Service at once, whatever
+          # this probe says, so the drain does not wait for it to fail.
           readinessProbe:
             httpGet:
               path: /readyz

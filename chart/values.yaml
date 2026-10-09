@@ -4,6 +4,10 @@
 # Pods serving requests.
 replicaCount: 2
 
+# Annotations for the pods; the chart sets none of its own. Adding or changing
+# one changes the pod template, and so replaces every pod in a rolling update.
+podAnnotations: {}
+
 image:
   # The name `make image` gives the image it builds. This project publishes no
   # image: for a real cluster, push your build to a registry the cluster can
@@ -29,6 +33,32 @@ model:
 service:
   # The port clients inside the cluster connect to.
   port: 80
+
+# How a pod is taken out of service without failing a request, whether it goes
+# in a rolling update, a node drain or a scale-down. The steps, in order:
+#
+#   1. Kubernetes marks the pod as terminating. Every node stops sending it
+#      new connections, each as soon as it hears of it. The pod itself is not
+#      told yet and serves as before, for preStopSeconds.
+#   2. The service gets SIGTERM and stops listening. Connections that are open
+#      are still served: each is told `Connection: close` with its next
+#      response, or is closed once it has been idle for keepAliveSeconds.
+#   3. Requests that are still running or queued get requestSeconds more.
+#
+# The process then exits by itself. The three add up to the pod's
+# terminationGracePeriodSeconds, after which the kubelet kills what is left.
+termination:
+  # Has to be longer than it takes the news of step 1 to reach every node. If
+  # it is not, a new connection arrives at a pod that has stopped listening.
+  # On the kind cluster in CI the news took a little under a second.
+  preStopSeconds: 10
+  # How long the service keeps an idle connection open, at any time, and so
+  # also how long a stopping pod waits for its open connections in step 2. A
+  # client must not reuse a connection that has been idle for this long.
+  keepAliveSeconds: 5
+  # More than the longest request takes: a full queue's wait for a slot, plus
+  # one run of the model.
+  requestSeconds: 15
 
 metrics:
   # How often Prometheus scrapes each pod. Nothing that is worked out from the
