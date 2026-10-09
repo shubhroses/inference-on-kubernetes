@@ -10,6 +10,11 @@ __pycache__/
 .coverage.*
 htmlcov/
 
+# The kind cluster's kubeconfig, written by `make up`, and what `make
+# diagnostics` collects from the cluster
+.kube/
+diagnostics/
+
 # Editors and operating systems
 .DS_Store
 .idea/

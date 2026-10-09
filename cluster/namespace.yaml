@@ -1,0 +1,14 @@
+# The namespace the chart is installed into. It belongs to the cluster setup
+# and not to the chart: a chart should not decide the rules of the namespace
+# it lands in.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: inference
+  labels:
+    # The API server refuses to create any pod here that does not meet the
+    # "restricted" Pod Security Standard: not root, no privilege escalation,
+    # no capabilities, the default seccomp profile. If the chart's
+    # securityContext fell short, the Deployment would get no pods and the
+    # install would fail, so every green end-to-end run is the proof.
+    pod-security.kubernetes.io/enforce: restricted

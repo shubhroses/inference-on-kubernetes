@@ -35,10 +35,8 @@ jobs:
         run: ruff check --output-format=github .
       - name: Check formatting
         run: ruff format --check .
-      - name: Unit tests
-        run: coverage run -m pytest
-      - name: Coverage floor
-        run: coverage report
+      - name: Unit tests, with the coverage floor
+        run: make test
 
   lint:
     name: actionlint, shellcheck and pins
@@ -136,8 +134,10 @@ jobs:
         run: grep -E '^[A-Z][A-Z0-9_]*=' versions.env >> "$GITHUB_ENV"
       - name: Lint the Dockerfile
         run: docker run --rm --interactive "$HADOLINT_IMAGE" < Dockerfile
+      # The same target `make up` builds the image with. It tags the image with
+      # the commit, which is the name this job's IMAGE has.
       - name: Build the image
-        run: docker build --build-arg GIT_SHA="$GITHUB_SHA" --tag "$IMAGE" .
+        run: make image
       - name: Check that the image has the Python version the unit tests ran on
         run: |
           in_image=$(docker run --rm "$IMAGE" python --version)

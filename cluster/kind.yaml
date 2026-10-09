@@ -1,0 +1,14 @@
+# The test cluster: one control plane and two workers, each a container.
+#
+# With workers present, kind leaves the control plane's NoSchedule taint in
+# place, so the service's pods run on the two workers only. Two, so that the
+# pods of one worker have somewhere to go when it is drained.
+#
+# The node image, and with it the Kubernetes version, is not named here:
+# `make up` passes the one pinned in versions.env.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+  - role: worker
+  - role: worker
