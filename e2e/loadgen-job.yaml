@@ -1,0 +1,61 @@
+# The load generator in loadgen/, as a Job. e2e/load.py puts a name, the image
+# and the arguments where the three words with a dollar sign are, and creates
+# the Job in the namespace `default`, where the service's clients are.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: $name
+  labels:
+    app.kubernetes.io/name: loadgen
+spec:
+  # A run that dies is a failed test. Starting it again would hide that.
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: loadgen
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      # On the control-plane node, the one node the tests never drain, so that
+      # the load keeps coming whichever worker is being emptied. The toleration
+      # lets the pod past the taint that keeps other pods off that node.
+      nodeSelector:
+        node-role.kubernetes.io/control-plane: ""
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: loadgen
+          # The service's own image, for the Python in it: the image is on
+          # every node already, and the load generator needs nothing but the
+          # standard library. Its source is mounted below, next to the
+          # service's, where `python -m loadgen` finds it.
+          image: $image
+          imagePullPolicy: Never
+          command: ["python", "-m", "loadgen"]
+          args: $arguments
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: source
+              mountPath: /srv/loadgen
+      volumes:
+        - name: source
+          configMap:
+            name: loadgen

@@ -19,7 +19,7 @@ PROMETHEUS = "kube-prometheus-stack-prometheus:9090"
 GRAFANA = "kube-prometheus-stack-grafana:80"
 
 # How long a test gives Prometheus and Grafana to catch up with the cluster.
-# Prometheus starts scraping a new ServiceMonitor 40 to 55 seconds after it is
+# Prometheus starts scraping a new ServiceMonitor about a minute after it is
 # created and sees every later change at its next scrape; Grafana loads a new
 # dashboard within seconds. Only a test that is about to fail waits this long.
 CATCH_UP_SECONDS = 300

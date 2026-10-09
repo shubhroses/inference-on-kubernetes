@@ -1,17 +1,21 @@
 """What the tests know about the cluster, and how they act on it.
 
-Everything goes through kubectl. An HTTP request is made from a pod inside the
-cluster, the way a client of the service makes it: to the Service's DNS name.
-`kubectl port-forward` would be less work, but it connects to one pod and so
-goes around the Service that the tests are about.
+Everything goes through kubectl, and through helm where a test upgrades the
+release. An HTTP request is made from a pod inside the cluster, the way a
+client of the service makes it: to the Service's DNS name. `kubectl
+port-forward` would be less work, but it connects to one pod and so goes
+around the Service that the tests are about.
 """
 
+import itertools
 import json
 import os
 import subprocess
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from pathlib import Path
 
 import pytest
 
@@ -20,6 +24,7 @@ import pytest
 NAMESPACE = "inference"
 RELEASE = "inference"
 SERVICE_URL = f"http://{RELEASE}.{NAMESPACE}.svc.cluster.local"
+CHART = Path(__file__).resolve().parent.parent / "chart"
 
 # Client pods run outside the service's namespace, as its clients would. That
 # namespace would not admit them anyway: it enforces the restricted Pod
@@ -55,16 +60,25 @@ print(json.dumps({"status": response.status, "body": response.read().decode()}))
 """
 
 
-def kubectl(*arguments: str) -> str:
+def kubectl(*arguments: str, stdin: str | None = None, timeout: float = 60) -> str:
     """Run kubectl and return what it printed.
 
     A command that fails, fails the test: with an assertion, so that a test
     which is waiting for the cluster to catch up can use `eventually` to try again.
     """
+    return run("kubectl", *arguments, stdin=stdin, timeout=timeout)
+
+
+def helm(*arguments: str, timeout: float = 60) -> str:
+    """Run helm and return what it printed. It reads the same kubeconfig as kubectl."""
+    return run("helm", *arguments, stdin=None, timeout=timeout)
+
+
+def run(*command: str, stdin: str | None, timeout: float) -> str:
     result = subprocess.run(
-        ["kubectl", *arguments], capture_output=True, text=True, timeout=60, check=False
+        command, input=stdin, capture_output=True, text=True, timeout=timeout, check=False
     )
-    assert result.returncode == 0, f"kubectl {' '.join(arguments)} failed:\n{result.stderr}"
+    assert result.returncode == 0, f"{' '.join(command)} failed:\n{result.stderr}"
     return result.stdout
 
 
@@ -80,15 +94,71 @@ def request(method: str, path: str, body: dict[str, object] | None = None) -> tu
     return answer["status"], answer["body"]
 
 
+def deployment(field: str) -> str:
+    """One field of the service's Deployment, named the way kubectl's jsonpath names it."""
+    return kubectl(
+        "get", "deployment", RELEASE, f"--namespace={NAMESPACE}", f"--output=jsonpath={{{field}}}"
+    )
+
+
+def pods() -> dict[str, str]:
+    """The service's pods, each with the node it is on.
+
+    A pod that has been told to go is listed until it is gone.
+    """
+    listed = kubectl(
+        "get",
+        "pods",
+        f"--namespace={NAMESPACE}",
+        f"--selector=app.kubernetes.io/instance={RELEASE}",
+        "--output=json",
+    )
+    return {
+        pod["metadata"]["name"]: pod["spec"].get("nodeName", "")
+        for pod in json.loads(listed)["items"]
+    }
+
+
+@contextmanager
+def ready_replicas() -> Iterator[list[int]]:
+    """Collect the numbers of Ready replicas the Deployment goes through during the `with` block.
+
+    `kubectl get --watch` prints the object once and then again at each change
+    to it, so a number that held only for a moment is in the list too. The
+    list is filled in when the block ends, with each change of the number
+    listed once.
+    """
+    watch = subprocess.Popen(
+        [
+            "kubectl",
+            "get",
+            "deployment",
+            RELEASE,
+            f"--namespace={NAMESPACE}",
+            "--watch",
+            # The field is left out of the object while it is zero, which
+            # prints as an empty line.
+            '--output=jsonpath={.status.readyReplicas}{"\\n"}',
+        ],
+        stdout=subprocess.PIPE,
+        text=True,
+    )
+    numbers: list[int] = []
+    try:
+        yield numbers
+    finally:
+        watched_to_the_end = watch.poll() is None
+        watch.terminate()
+        printed, _ = watch.communicate(timeout=30)
+    assert watched_to_the_end, "kubectl stopped watching the Deployment before the test was done"
+    reported = [int(line or 0) for line in printed.splitlines()]
+    assert reported, "kubectl reported nothing about the Deployment"
+    numbers.extend(number for number, _ in itertools.groupby(reported))
+
+
 def run_in_pod(*command: str) -> str:
     """Run a command in a new pod of the service's image and return what it printed."""
-    image = kubectl(
-        "get",
-        "deployment",
-        RELEASE,
-        f"--namespace={NAMESPACE}",
-        "--output=jsonpath={.spec.template.spec.containers[0].image}",
-    )
+    image = deployment(".spec.template.spec.containers[0].image")
     pod = f"client-{uuid.uuid4().hex[:8]}"
     kubectl(
         "run",
