@@ -10,9 +10,11 @@ __pycache__/
 .coverage.*
 htmlcov/
 
-# The kind cluster's kubeconfig, written by `make up`, what the end-to-end
-# tests measured, and what `make diagnostics` collects from the cluster
+# The kind cluster's kubeconfig, written by `make up`, the KEDA chart it
+# downloads, what the end-to-end tests measured, and what `make diagnostics`
+# collects from the cluster
 .kube/
+.cache/
 reports/
 diagnostics/
 

@@ -1,7 +1,7 @@
 # The entry points, the same on a laptop and in CI:
 #
-#   make up     create the kind cluster, install Prometheus and Grafana, build
-#               the image and install the chart
+#   make up     create the kind cluster, install Prometheus, Grafana and KEDA,
+#               build the image and install the chart
 #   make test   run the unit tests, with the coverage floor
 #   make e2e    run the end-to-end tests against the kind cluster
 #   make down   delete the kind cluster
@@ -14,8 +14,8 @@
 # context is the kind cluster `make up` created. Nothing in this file can reach
 # a cluster this repository did not make, whatever kubectl points at elsewhere.
 
-# The pinned tool, image and chart versions: KIND_NODE_IMAGE and
-# KUBE_PROMETHEUS_STACK_CHART come from here.
+# The pinned tool, image and chart versions: KIND_NODE_IMAGE,
+# KUBE_PROMETHEUS_STACK_CHART and KEDA_CHART_VERSION come from here.
 include versions.env
 
 CLUSTER_NAME := inference-on-kubernetes
@@ -28,6 +28,11 @@ RELEASE := inference
 # and kube-prometheus-stack-grafana.
 MONITORING_NAMESPACE := monitoring
 MONITORING_RELEASE := kube-prometheus-stack
+# Where KEDA, the autoscaler, runs, and where its chart is kept once it has
+# been downloaded and checked.
+KEDA_NAMESPACE := keda
+KEDA_RELEASE := keda
+KEDA_CHART := .cache/keda-$(KEDA_CHART_VERSION).tgz
 
 # The commit being built and tested. It is the image's tag, the image reports
 # it in its build-info metric, and the smoke test compares that with this.
@@ -47,18 +52,19 @@ TIMEOUT := 5m
 # one at a time and in the order written, also under `make -j`.
 .NOTPARALLEL:
 
-.PHONY: help up test e2e down cluster nodes monitoring image deploy check-context diagnostics
+.PHONY: help up test e2e down cluster nodes monitoring keda image deploy check-context diagnostics
 
 help:
-	@echo "make up     create the kind cluster, install Prometheus and Grafana, build the image and install the chart"
+	@echo "make up     create the kind cluster, install Prometheus, Grafana and KEDA, build the image and install the chart"
 	@echo "make test   run the unit tests, with the coverage floor"
 	@echo "make e2e    run the end-to-end tests against the kind cluster"
 	@echo "make down   delete the kind cluster"
 
 # Monitoring goes in before the service: the service's chart creates a
 # ServiceMonitor, a kind of object that exists only once the monitoring chart
-# has defined it.
-up: cluster monitoring deploy
+# has defined it. KEDA goes in before the service as well, for the kind of
+# object the chart is about to get.
+up: cluster monitoring keda deploy
 
 test:
 	coverage run -m pytest
@@ -107,6 +113,30 @@ monitoring: check-context nodes
 		--for=condition=Available --timeout=$(TIMEOUT)
 	kubectl --namespace $(MONITORING_NAMESPACE) get pods --output wide
 
+# KEDA: the operator, which makes a HorizontalPodAutoscaler out of the
+# service's ScaledObject, and the metrics server, which answers that
+# autoscaler's question of what number to scale on. Kubernetes passes the
+# question on through the API named below, so nothing is installed after this
+# until that API answers. cluster/keda-values.yaml says what is switched off.
+keda: check-context nodes $(KEDA_CHART)
+	helm upgrade --install $(KEDA_RELEASE) $(KEDA_CHART) \
+		--namespace $(KEDA_NAMESPACE) --create-namespace \
+		--values cluster/keda-values.yaml --wait --timeout $(TIMEOUT)
+	kubectl wait apiservice/v1beta1.external.metrics.k8s.io \
+		--for=condition=Available --timeout=$(TIMEOUT)
+	kubectl --namespace $(KEDA_NAMESPACE) get pods --output wide
+
+# KEDA's chart, downloaded once and kept. It comes from a web server, which
+# has no way of promising that the file is the one that was there yesterday,
+# so shasum compares it with the SHA-256 in versions.env, and only a file that
+# matches is given the name the target above looks for.
+$(KEDA_CHART):
+	mkdir -p $(@D)/unchecked
+	helm pull keda --repo https://kedacore.github.io/charts --version $(KEDA_CHART_VERSION) \
+		--destination $(@D)/unchecked
+	echo "$(KEDA_CHART_SHA256)  $(@D)/unchecked/$(@F)" | shasum --algorithm 256 --check
+	mv $(@D)/unchecked/$(@F) $@
+
 image:
 	docker build --build-arg GIT_SHA=$(GIT_SHA) --tag $(IMAGE) .
 
@@ -133,11 +163,11 @@ check-context:
 	@echo "Using context $(KUBE_CONTEXT) from $(KUBECONFIG)"
 
 # What CI keeps when a run fails: the events, the state of the pods, the
-# service's logs and the load generator's, Prometheus's list of what it scrapes
-# and of its rules, with how each is going (asked for through the API server,
-# which passes the request on to the Service), and kind's own dump of each node
-# with the kubelet's and every container's log. The leading "-" lets one
-# command fail without stopping the ones after it.
+# service's logs, the load generator's and KEDA's, Prometheus's list of what it
+# scrapes and of its rules, with how each is going (asked for through the API
+# server, which passes the request on to the Service), and kind's own dump of
+# each node with the kubelet's and every container's log. The leading "-" lets
+# one command fail without stopping the ones after it.
 diagnostics: check-context
 	mkdir -p diagnostics
 	-kubectl get events --all-namespaces --sort-by=.metadata.creationTimestamp > diagnostics/events.txt
@@ -148,6 +178,8 @@ diagnostics: check-context
 		--all-containers --prefix --tail=-1 > diagnostics/logs.txt
 	-kubectl --namespace default logs --selector app.kubernetes.io/name=loadgen \
 		--prefix --tail=-1 > diagnostics/loadgen.txt
+	-kubectl --namespace $(KEDA_NAMESPACE) logs --selector app.kubernetes.io/instance=$(KEDA_RELEASE) \
+		--all-containers --prefix --tail=-1 > diagnostics/keda.txt
 	-kubectl get --raw /api/v1/namespaces/$(MONITORING_NAMESPACE)/services/$(MONITORING_RELEASE)-prometheus:9090/proxy/api/v1/targets \
 		> diagnostics/prometheus-targets.json
 	-kubectl get --raw /api/v1/namespaces/$(MONITORING_NAMESPACE)/services/$(MONITORING_RELEASE)-prometheus:9090/proxy/api/v1/rules \

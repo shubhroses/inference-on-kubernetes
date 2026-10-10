@@ -66,6 +66,7 @@ printf 'apiVersion: v1\nkind: Config\ncurrent-context: %s\n' kind-inference-on-k
 echo "When the current context is not the kind cluster:"
 expect_refusal "$make_refuses 'somewhere-else'" make nodes
 expect_refusal "$make_refuses 'somewhere-else'" make monitoring
+expect_refusal "$make_refuses 'somewhere-else'" make keda
 expect_refusal "$make_refuses 'somewhere-else'" make deploy
 expect_refusal "$make_refuses 'somewhere-else'" make e2e
 expect_refusal "$make_refuses 'somewhere-else'" make diagnostics

@@ -1,0 +1,44 @@
+# Values for the KEDA chart, which `make up` installs in the namespace `keda`
+# at the version pinned in versions.env.
+#
+# Two pods are left. The operator reads the service's ScaledObject and keeps a
+# HorizontalPodAutoscaler in step with it. The metrics server is what that
+# autoscaler's questions reach: Kubernetes asks it for the number to scale on,
+# and it has the operator run the query against Prometheus.
+
+# KEDA can also check a ScaledObject at the moment it is created and refuse a
+# mistaken one, through an admission webhook: a third pod. It is switched off,
+# like the Prometheus Operator's. The cluster has little memory, and a mistake
+# in the one ScaledObject here shows up anyway, in CI's schema check or as an
+# autoscaler that never becomes active.
+webhooks:
+  enabled: false
+
+image:
+  # The chart's default is Always: ask the registry at every start of a pod.
+  # The tags are fixed releases, so an image a node already has is the right one.
+  pullPolicy: IfNotPresent
+
+# On the control-plane node, like the monitoring stack and for the same
+# reason: the end-to-end tests drain the workers, and the autoscaler should
+# not be evicted in the middle of a test. These two settings apply to both
+# pods.
+nodeSelector:
+  node-role.kubernetes.io/control-plane: ""
+tolerations:
+  - key: node-role.kubernetes.io/control-plane
+    operator: Exists
+    effect: NoSchedule
+
+# The chart asks for 100 MB and a tenth of a CPU for each pod. On a CI runner
+# each was using about 40 MB and next to no CPU, and the requests below are
+# close to that. The chart's limits of 1 CPU and 1000 MB stay as they are.
+resources:
+  operator:
+    requests:
+      cpu: 10m
+      memory: 48Mi
+  metricServer:
+    requests:
+      cpu: 10m
+      memory: 48Mi
