@@ -45,6 +45,13 @@ IMAGE := inference-on-kubernetes:$(GIT_SHA)
 override KUBECONFIG := $(CURDIR)/.kube/config
 export KUBECONFIG
 
+# Helm reads these variables before it reads the kubeconfig. A shell that has
+# one of them set could send a release to another API server or namespace, so
+# none of them is passed on to the commands below.
+unexport HELM_KUBEAPISERVER HELM_KUBETOKEN HELM_KUBECONTEXT HELM_KUBEASUSER
+unexport HELM_KUBEASGROUPS HELM_KUBECAFILE HELM_KUBEINSECURE_SKIP_TLS_VERIFY
+unexport HELM_KUBETLS_SERVER_NAME HELM_NAMESPACE
+
 # How long to wait for the cluster to come up and for a chart to become ready.
 TIMEOUT := 5m
 
