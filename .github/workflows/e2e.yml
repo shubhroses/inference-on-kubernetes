@@ -18,20 +18,41 @@ on:
       - requirements*.txt
       - versions.env
       - .github/workflows/e2e.yml
+  # Every night, on main. No commit has changed anything by then, so a run
+  # that fails has met something outside the repository, a runner image or a
+  # registry, or a test that does not pass every time. Not on the hour, when
+  # most schedules are due and GitHub starts them late.
+  schedule:
+    - cron: "17 7 * * *"
 
 permissions:
   contents: read
 
 # A newer push to the same branch or pull request replaces the run in progress.
+# The event is part of the group, so that the nightly run and a push to main,
+# which are on the same branch, leave each other alone.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   kind:
-    name: end-to-end tests on a kind cluster
+    name: end-to-end tests on kind, Kubernetes ${{ matrix.kubernetes }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    strategy:
+      # Each release runs to its end, also when the other has failed: whether
+      # a failure shows on both or on one is the first thing to know about it.
+      fail-fast: false
+      matrix:
+        # Two Kubernetes releases. `kubernetes` names the job, and `node-image`
+        # names the line in versions.env that pins that release's node image.
+        # The step after `make up` fails if the two do not go together.
+        include:
+          - kubernetes: "1.36"
+            node-image: KIND_NODE_IMAGE
+          - kubernetes: "1.35"
+            node-image: KIND_PREVIOUS_NODE_IMAGE
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -59,8 +80,16 @@ jobs:
       # its own where the cluster's will be.
       - name: Check that make and the tests refuse any context but the kind cluster's
         run: scripts/test-cluster-guard.sh
+      # A variable on make's command line replaces the one of the same name
+      # that the Makefile reads from versions.env.
       - name: Create the kind cluster, install Prometheus, Grafana and KEDA, build the image, install the chart
-        run: make up
+        run: make up KIND_NODE_IMAGE="${{ env[matrix.node-image] }}"
+      # The node image decides which Kubernetes the cluster runs, so the API
+      # server is asked. grep prints its answer, or fails the step.
+      - name: Check that the cluster runs the Kubernetes release this job is named after
+        run: |
+          kubectl --kubeconfig .kube/config version |
+            grep "Server Version: v${{ matrix.kubernetes }}\."
       - name: Run the end-to-end tests
         run: make e2e
       # What the tests measured: the requests each load sent, how many failed
@@ -87,7 +116,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: e2e-reports-and-logs
+          name: e2e-kubernetes-${{ matrix.kubernetes }}
           path: |
             reports/
             diagnostics/
