@@ -63,12 +63,12 @@ jobs:
         run: make up
       - name: Run the end-to-end tests
         run: make e2e
-      # What the tests measured under load, how the replica count went, and
-      # when the alert fired and cleared: a table and notes, and the reports
-      # themselves as an artifact. Also when a test has failed. The last line
-      # is the runner's memory: three nodes, Prometheus, Grafana and KEDA
-      # share it, and it is the first thing to run short. tee writes all of it
-      # to the run's summary page and to this step's log.
+      # What the tests measured: the requests each load sent, how many failed
+      # and how long they took, the replica counts the autoscaler went
+      # through, and when the alert fired and cleared. Also when a test has
+      # failed. The last line is the runner's memory: three nodes, Prometheus,
+      # Grafana and KEDA share it, and it is the first thing to run short. tee
+      # writes all of it to the run's summary page and to this step's log.
       - name: Write the tests' results to the job summary and the log
         if: always()
         run: |
@@ -77,21 +77,19 @@ jobs:
             printf "\nMemory of the runner after the tests: %d of %d MiB in use, %d MiB available.\n", $3, $2, $7
           }' >> "$RUNNER_TEMP/summary.md"
           tee --append "$GITHUB_STEP_SUMMARY" < "$RUNNER_TEMP/summary.md"
-      - name: Upload the load reports
+      # On every run, not only on a failed one: a run that passed is what a
+      # failed one is compared with, and collecting every time keeps the
+      # collecting itself in working order.
+      - name: Collect events and pod logs
+        if: always()
+        run: make diagnostics
+      - name: Upload the load reports, events and pod logs
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: load-reports
-          path: reports/
+          name: e2e-reports-and-logs
+          path: |
+            reports/
+            diagnostics/
           if-no-files-found: ignore
-          retention-days: 14
-      - name: Collect events and pod logs
-        if: failure()
-        run: make diagnostics
-      - name: Upload events and pod logs
-        if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: diagnostics
-          path: diagnostics/
           retention-days: 14

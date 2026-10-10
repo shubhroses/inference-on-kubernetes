@@ -171,12 +171,12 @@ check-context:
 	fi
 	@echo "Using context $(KUBE_CONTEXT) from $(KUBECONFIG)"
 
-# What CI keeps when a run fails: the events, the state of the pods, the
-# service's logs, the load generator's and KEDA's, Prometheus's list of what it
-# scrapes and of its rules, with how each is going (asked for through the API
-# server, which passes the request on to the Service), and kind's own dump of
-# each node with the kubelet's and every container's log. The leading "-" lets
-# one command fail without stopping the ones after it.
+# What CI keeps of every run, passed or failed: the events, the state of the
+# pods, the service's logs, the load generator's and KEDA's, Prometheus's list
+# of what it scrapes and of its rules, with how each is going (asked for
+# through the API server, which passes the request on to the Service), and
+# kind's own dump of each node with the kubelet's and every container's log.
+# The leading "-" lets one command fail without stopping the ones after it.
 diagnostics: check-context
 	mkdir -p diagnostics
 	-kubectl get events --all-namespaces --sort-by=.metadata.creationTimestamp > diagnostics/events.txt
