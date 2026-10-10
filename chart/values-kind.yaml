@@ -13,8 +13,23 @@ faultInjection: true
 
 metrics:
   # A window has to hold several scrapes before a rate can be worked out over
-  # it. Scraping this often is what makes windows of seconds possible.
-  scrapeInterval: 5s
+  # it, and many of them before the average of a number that jumps about as
+  # the autoscaler's does comes out steady. Scraping this often is what makes
+  # windows of seconds possible.
+  scrapeInterval: 2s
+
+# The autoscaling test puts three minutes of load on the service and then
+# waits for the pods it added to go again. Two windows are shorter for it.
+autoscaling:
+  # Averaged over a whole minute, a load that begins all at once climbs
+  # slowly enough that an autoscaler without the limit on scaling up would
+  # now and then add its two pods half a minute apart of its own accord, and
+  # the test of that limit would have nothing to see.
+  window: 45s
+  # One minute of the number asking for fewer pods, where a real cluster
+  # waits five, so that the test does not have to.
+  scaleDown:
+    stabilizationWindowSeconds: 60
 
 # The alert test cannot wait an hour for a page. Here each hour of a long
 # window is two minutes, and each short window is six scrapes or more. With

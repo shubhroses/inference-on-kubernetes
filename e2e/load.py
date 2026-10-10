@@ -35,10 +35,12 @@ REQUESTS = RATE * SECONDS
 KEPT_CONNECTIONS = 8
 
 
-def start(test: str, *, seconds: int = SECONDS, fail_ratio: float = 0) -> str:
+def start(test: str, *, seconds: int = SECONDS, fail_ratio: float = 0, clients: int = 0) -> str:
     """Start the load. Returns the Job's name, once the load is under way.
 
-    With `fail_ratio`, that share of the requests asks the service to fail.
+    The load is RATE requests a second or, with `clients`, comes from that
+    many clients which each send one request after another. With `fail_ratio`,
+    that share of the requests asks the service to fail.
     """
     job = f"load-{test}"
     # The source travels as a ConfigMap, which the Job mounts into a pod of
@@ -54,13 +56,12 @@ def start(test: str, *, seconds: int = SECONDS, fail_ratio: float = 0) -> str:
         "--output=yaml",
     )
     kubectl("apply", "--filename=-", IN_CLIENT_NAMESPACE, stdin=source)
-    arguments = [
-        f"--url={SERVICE_URL}/v1/infer",
-        f"--rate={RATE}",
-        f"--seconds={seconds}",
-        f"--connections={KEPT_CONNECTIONS}",
-        f"--fail-ratio={fail_ratio}",
-    ]
+    arguments = [f"--url={SERVICE_URL}/v1/infer", f"--seconds={seconds}"]
+    if clients:
+        arguments += [f"--clients={clients}"]
+    else:
+        arguments += [f"--rate={RATE}", f"--connections={KEPT_CONNECTIONS}"]
+    arguments += [f"--fail-ratio={fail_ratio}"]
     manifest = string.Template(JOB.read_text()).substitute(
         name=job,
         image=deployment(".spec.template.spec.containers[0].image"),

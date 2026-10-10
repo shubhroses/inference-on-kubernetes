@@ -11,7 +11,8 @@
 #     fires    14.4% x 120 s / 30%      =  57.6 s after the failures begin
 #     clears   30 s x (1 - 14.4% / 30%) =  15.6 s after they stop
 #
-# In the cluster a scrape and an evaluation, 5 s each, come on top of both.
+# In the cluster a scrape, every 2 s, and an evaluation, every 5 s, come on
+# top of both.
 
 rule_files:
   - kind.rules.yaml
