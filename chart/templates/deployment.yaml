@@ -5,9 +5,16 @@ metadata:
   labels:
     {{- include "inference.labels" . | nindent 4 }}
 spec:
-  replicas: {{ .Values.replicaCount }}
-  # A rolling update never has fewer Ready pods than `replicas`: a new pod has
-  # to be Ready before an old one is told to go, one pod at a time.
+  # There is no `replicas` here, on purpose: the count belongs to the
+  # autoscaler made from templates/scaledobject.yaml. Were it written here as
+  # well, a `helm upgrade` would either put it back, whatever the load at
+  # that moment, or be refused because another controller has changed the
+  # field since. Left out, a new Deployment begins with one pod, which the
+  # autoscaler raises to its minimum the first time it looks, within a
+  # quarter of a minute.
+  #
+  # A rolling update never has fewer Ready pods than the replica count: a new
+  # pod has to be Ready before an old one is told to go, one pod at a time.
   strategy:
     type: RollingUpdate
     rollingUpdate:

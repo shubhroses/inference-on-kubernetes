@@ -1,0 +1,140 @@
+# Unit tests for the number the autoscaler scales on: the query of the chart's
+# ScaledObject, evaluated over made-up series. scripts/test-rules.sh renders
+# the chart with its default values and writes the query down as a rule that
+# records `autoscaler:requests`, because rules are what promtool evaluates.
+#
+# The query adds up the requests that are running or waiting in each pod and
+# averages that sum over the last minute. With the default values a pod is
+# scraped every 15 seconds, so the series below have a sample every 15
+# seconds and a minute holds four of them. The autoscaler divides the number
+# by the pods there are and compares the result with the target of 6.
+
+rule_files:
+  - autoscaling.rules.yaml
+
+evaluation_interval: 15s
+
+tests:
+  - name: Requests that are running and requests that are waiting both count, in every pod
+    interval: 15s
+    input_series:
+      # Two pods with 8 slots: all 16 slots busy, and 8 more requests waiting.
+      - series: 'inference_requests_in_flight{namespace="inference", job="inference", pod="a"}'
+        values: '8x20'
+      - series: 'inference_requests_queued{namespace="inference", job="inference", pod="a"}'
+        values: '5x20'
+      - series: 'inference_requests_in_flight{namespace="inference", job="inference", pod="b"}'
+        values: '8x20'
+      - series: 'inference_requests_queued{namespace="inference", job="inference", pod="b"}'
+        values: '3x20'
+      # Another release, in another namespace, is none of this autoscaler's business.
+      - series: 'inference_requests_in_flight{namespace="elsewhere", job="inference", pod="z"}'
+        values: '8x20'
+      - series: 'inference_requests_queued{namespace="elsewhere", job="inference", pod="z"}'
+        values: '8x20'
+    promql_expr_test:
+      - expr: autoscaler:requests
+        eval_time: 5m
+        exp_samples:
+          - labels: 'autoscaler:requests'
+            value: 24
+
+  - name: One reading that is far off moves the number by a fraction of it
+    interval: 15s
+    input_series:
+      # 24 requests on two pods, except that the scrape of minute 4 happens
+      # to catch pod "a" with 20 of them: a sum of 32 where the others are 24.
+      - series: 'inference_requests_in_flight{namespace="inference", job="inference", pod="a"}'
+        values: '8x20'
+      - series: 'inference_requests_queued{namespace="inference", job="inference", pod="a"}'
+        values: '4x15 12 4x4'
+      - series: 'inference_requests_in_flight{namespace="inference", job="inference", pod="b"}'
+        values: '8x20'
+      - series: 'inference_requests_queued{namespace="inference", job="inference", pod="b"}'
+        values: '4x20'
+    promql_expr_test:
+      # That reading is one of the four the last minute holds.
+      - expr: autoscaler:requests
+        eval_time: 4m
+        exp_samples:
+          - labels: 'autoscaler:requests'
+            value: 26
+
+  - name: A pod that has just been added does not make the same requests count twice
+    interval: 15s
+    input_series:
+      # 24 requests on three pods, 8 each. From minute 2 on a fourth pod takes
+      # its share, and each has 6. There are 24 requests all along.
+      - series: 'inference_requests_in_flight{namespace="inference", job="inference", pod="a"}'
+        values: '8x7 6x12'
+      - series: 'inference_requests_queued{namespace="inference", job="inference", pod="a"}'
+        values: '0x20'
+      - series: 'inference_requests_in_flight{namespace="inference", job="inference", pod="b"}'
+        values: '8x7 6x12'
+      - series: 'inference_requests_queued{namespace="inference", job="inference", pod="b"}'
+        values: '0x20'
+      - series: 'inference_requests_in_flight{namespace="inference", job="inference", pod="c"}'
+        values: '8x7 6x12'
+      - series: 'inference_requests_queued{namespace="inference", job="inference", pod="c"}'
+        values: '0x20'
+      # "_" is a scrape that did not happen: the pod was not there yet.
+      - series: 'inference_requests_in_flight{namespace="inference", job="inference", pod="d"}'
+        values: '_x8 6x12'
+      - series: 'inference_requests_queued{namespace="inference", job="inference", pod="d"}'
+        values: '_x8 0x12'
+    promql_expr_test:
+      - expr: autoscaler:requests
+        eval_time: 2m15s
+        exp_samples:
+          - labels: 'autoscaler:requests'
+            value: 24
+      # Why the query adds up first and averages second. The other way round,
+      # at this moment, each old pod's average over the minute is 7 (two
+      # readings of 8, two of 6) and the new pod's is 6 (it has no others):
+      # 27 requests where there are 24, and at a target of 6 a pod that
+      # would call for a fifth pod.
+      - expr: >-
+          sum(avg_over_time(inference_requests_in_flight{namespace="inference"}[1m])
+          + avg_over_time(inference_requests_queued{namespace="inference"}[1m]))
+        eval_time: 2m15s
+        exp_samples:
+          - labels: '{}'
+            value: 27
+
+  - name: When the requests stop, the number is down to nothing a minute later
+    interval: 15s
+    input_series:
+      - series: 'inference_requests_in_flight{namespace="inference", job="inference", pod="a"}'
+        values: '8x8 0x12'
+      - series: 'inference_requests_queued{namespace="inference", job="inference", pod="a"}'
+        values: '4x8 0x12'
+    promql_expr_test:
+      # The last reading with requests in it is that of minute 2. Half a
+      # minute later it is one of two such readings among the four.
+      - expr: autoscaler:requests
+        eval_time: 2m
+        exp_samples:
+          - labels: 'autoscaler:requests'
+            value: 12
+      - expr: autoscaler:requests
+        eval_time: 2m30s
+        exp_samples:
+          - labels: 'autoscaler:requests'
+            value: 6
+      - expr: autoscaler:requests
+        eval_time: 3m15s
+        exp_samples:
+          - labels: 'autoscaler:requests'
+            value: 0
+
+  - name: Without a series from the service there is no number, which is not the number zero
+    interval: 15s
+    input_series:
+      - series: 'inference_requests_in_flight{namespace="elsewhere", job="inference", pod="z"}'
+        values: '8x20'
+      - series: 'inference_requests_queued{namespace="elsewhere", job="inference", pod="z"}'
+        values: '8x20'
+    promql_expr_test:
+      - expr: autoscaler:requests
+        eval_time: 5m
+        exp_samples: []

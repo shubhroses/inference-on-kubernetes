@@ -12,7 +12,7 @@
 {{- $objective := .Values.slo.objective }}
 {{- $fastBurn := .Values.alerts.fastBurn }}
 {{- $slowBurn := .Values.alerts.slowBurn }}
-{{- $maxReplicas := int .Values.replicaCount }}
+{{- $maxReplicas := int .Values.autoscaling.maxReplicas }}
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -95,12 +95,11 @@ spec:
               for a model slot included, has been above {{ .Values.alerts.latency.p95Seconds }} s for five
               minutes.
 
-        # Saturation: requests are waiting for a slot and no pod can be added.
-        # Nothing scales the Deployment yet, so its maximum is the replica
-        # count it is installed with. The queue is read from the service's
-        # pods and the replica count from kube-state-metrics, whose series
-        # carry other labels, so the two sides are matched on the namespace
-        # alone.
+        # Saturation: requests are waiting for a slot and no pod can be added,
+        # because the autoscaler has already taken the Deployment to its
+        # maximum. The queue is read from the service's pods and the replica
+        # count from kube-state-metrics, whose series carry other labels, so
+        # the two sides are matched on the namespace alone.
         - alert: InferenceQueueAtMaxReplicas
           expr: |
             sum by (namespace, job) (inference_requests_queued{ {{ $thisRelease }} }) > 0

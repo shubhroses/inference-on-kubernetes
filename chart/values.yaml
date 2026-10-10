@@ -1,9 +1,6 @@
 # Defaults, shaped for a real cluster. values-kind.yaml holds what the test
 # cluster changes.
 
-# Pods serving requests.
-replicaCount: 2
-
 # Annotations for the pods; the chart sets none of its own. Adding or changing
 # one changes the pod template, and so replaces every pod in a rolling update.
 podAnnotations: {}
@@ -29,6 +26,53 @@ model:
   # Seconds the simulated model load takes when a pod starts. The pod is not
   # Ready, and so gets no requests, until it is over.
   loadSeconds: 2
+
+# How many pods there are. An autoscaler decides it, from one number: the
+# requests in the service, those running in a slot and those waiting for one,
+# divided by the pods. KEDA reads that number from Prometheus and hands it to
+# a HorizontalPodAutoscaler; templates/scaledobject.yaml has the query.
+#
+# The number and not the pods' CPU, because CPU says little here. A request
+# holds a slot for as long as the model takes, and the pod's own CPU is close
+# to idle meanwhile: the stand-in sleeps, and a real model would be busy on a
+# GPU. What tells a full pod from an empty one is how many requests it holds.
+autoscaling:
+  # Never fewer than two pods, so that one can be replaced or drained while
+  # the other serves, and never more than the most the service may cost.
+  # Requests that queue while the Deployment is at the maximum raise an alert.
+  minReplicas: 2
+  maxReplicas: 6
+  # The number the autoscaler aims for: this many requests per pod, running
+  # or waiting. Below model.slots on purpose. At 6 of 8 a pod still has two
+  # slots free, so pods are added before requests have to wait, not after.
+  targetRequestsPerPod: 6
+  # The number is averaged over this long before it is acted on. A scrape
+  # catches each pod at one instant, every pod at a different one, and with
+  # requests moving from pod to pod a single reading can be several requests
+  # off: enough to add a pod that nothing needed. Longer is steadier and
+  # slower. The window has to hold several scrapes (metrics.scrapeInterval).
+  window: 1m
+  # Up: at most this many pods in any period of this many seconds. A queue
+  # says that there are too few pods; it does not say how many are missing.
+  # When requests arrive only a little faster than the pods can serve them,
+  # the queues fill to the brim all the same, and the number reads as if
+  # several times the pods were needed. So pods are added one at a time, and
+  # each has half a minute to start, load its model and take its share,
+  # which empties the queues if it was enough, before the next is decided on.
+  scaleUp:
+    pods: 1
+    periodSeconds: 30
+  # Down: a pod goes only when the number has asked for fewer pods all
+  # through this many seconds; the autoscaler acts on the highest count the
+  # number asked for in that time. A lull of a minute then removes no pod
+  # that is needed again the minute after and would have to load its model
+  # first.
+  scaleDown:
+    stabilizationWindowSeconds: 300
+  # Where KEDA finds the Prometheus that scrapes this release. The default is
+  # the address the kube-prometheus-stack chart gives it when that chart is
+  # released under its own name in the namespace `monitoring`.
+  prometheusAddress: http://kube-prometheus-stack-prometheus.monitoring.svc:9090
 
 # The test flag. On, a request can ask to fail (?fail=true) or to take longer
 # (?delay=seconds), which is how a test produces errors on purpose. Off, the

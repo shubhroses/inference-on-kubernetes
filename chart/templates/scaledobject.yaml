@@ -1,0 +1,58 @@
+# Decides how many pods the Deployment has. A ScaledObject is an object of
+# KEDA, so the cluster has to have KEDA's CRDs before this chart is installed.
+# KEDA makes a HorizontalPodAutoscaler out of it, and it is that autoscaler,
+# a part of Kubernetes itself, which changes the Deployment's replica count.
+# What KEDA adds is the number to scale on: the autoscaler asks for it every
+# 15 seconds, and KEDA answers by running the query below against Prometheus.
+# values.yaml explains the settings under `autoscaling`.
+{{- $thisRelease := printf "namespace=%q, job=%q" .Release.Namespace .Release.Name }}
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ .Release.Name }}
+  labels:
+    {{- include "inference.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    name: {{ .Release.Name }}
+  minReplicaCount: {{ .Values.autoscaling.minReplicas | int }}
+  maxReplicaCount: {{ .Values.autoscaling.maxReplicas | int }}
+  advanced:
+    horizontalPodAutoscalerConfig:
+      # Named after the release, like everything else here. KEDA's own choice
+      # would be keda-hpa-<name>.
+      name: {{ .Release.Name }}
+      # Handed on to the HorizontalPodAutoscaler as they are.
+      behavior:
+        scaleUp:
+          policies:
+            - type: Pods
+              value: {{ .Values.autoscaling.scaleUp.pods | int }}
+              periodSeconds: {{ .Values.autoscaling.scaleUp.periodSeconds | int }}
+        scaleDown:
+          stabilizationWindowSeconds: {{ .Values.autoscaling.scaleDown.stabilizationWindowSeconds | int }}
+  triggers:
+    - type: prometheus
+      # The query's answer is divided by the number of pods, and the autoscaler
+      # aims to keep that average at the threshold.
+      metricType: AverageValue
+      metadata:
+        serverAddress: {{ .Values.autoscaling.prometheusAddress | quote }}
+        # The requests in the service, running or waiting, added up over this
+        # release's pods, as it was at each scrape of the last `window`; then
+        # the average of those sums. Adding up first and averaging second
+        # counts a pod only from the moment it exists. The other way round,
+        # a new pod's short average and the old pods' longer ones would count
+        # the requests the new pod has just taken over twice.
+        query: |-
+          avg_over_time(sum(
+            inference_requests_in_flight{ {{ $thisRelease }} }
+            + inference_requests_queued{ {{ $thisRelease }} }
+          )[{{ .Values.autoscaling.window }}:{{ .Values.metrics.scrapeInterval }}])
+        threshold: {{ .Values.autoscaling.targetRequestsPerPod | quote }}
+        # No answer is not the answer zero. If Prometheus has no series for
+        # this release, because it is not scraping the pods or has just
+        # restarted, KEDA reports an error and the replica count stays where
+        # it is. The default would read that as no requests at all and take
+        # the Deployment down to its minimum, however busy it is.
+        ignoreNullValues: "false"

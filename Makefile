@@ -60,10 +60,9 @@ help:
 	@echo "make e2e    run the end-to-end tests against the kind cluster"
 	@echo "make down   delete the kind cluster"
 
-# Monitoring goes in before the service: the service's chart creates a
-# ServiceMonitor, a kind of object that exists only once the monitoring chart
-# has defined it. KEDA goes in before the service as well, for the kind of
-# object the chart is about to get.
+# Monitoring and KEDA go in before the service: the service's chart creates a
+# ServiceMonitor and a ScaledObject, kinds of object that exist only once
+# those two charts have defined them.
 up: cluster monitoring keda deploy
 
 test:
@@ -141,14 +140,24 @@ image:
 	docker build --build-arg GIT_SHA=$(GIT_SHA) --tag $(IMAGE) .
 
 # Copies the image onto the nodes (there is no registry) and installs or
-# upgrades the chart. `--wait` returns when every pod of the new version is
-# Ready, or fails after the timeout.
+# upgrades the chart. `--wait` returns when the pods of the new version are
+# Ready, or fails after the timeout. On a first install that is one pod: a
+# new Deployment says nothing about replicas, and it is the autoscaler that
+# makes them two. So the commands after it wait for the autoscaler to take
+# charge: until KEDA has made it, until it has been given its number, which
+# takes as long as Prometheus needs to begin scraping the new pods, and until
+# the pods it wants are Ready.
 deploy: check-context nodes image
 	kind load docker-image $(IMAGE) --name $(CLUSTER_NAME)
 	kubectl apply --filename cluster/namespace.yaml
 	helm upgrade --install $(RELEASE) chart --namespace $(NAMESPACE) \
 		--values chart/values-kind.yaml --set-string image.tag=$(GIT_SHA) \
 		--wait --timeout $(TIMEOUT)
+	kubectl --namespace $(NAMESPACE) wait horizontalpodautoscaler/$(RELEASE) \
+		--for=create --timeout=$(TIMEOUT)
+	kubectl --namespace $(NAMESPACE) wait horizontalpodautoscaler/$(RELEASE) \
+		--for=condition=ScalingActive --timeout=$(TIMEOUT)
+	kubectl --namespace $(NAMESPACE) rollout status deployment/$(RELEASE) --timeout=$(TIMEOUT)
 	kubectl --namespace $(NAMESPACE) get pods --output wide
 
 # The guard every target that uses kubectl or helm depends on. With no cluster
@@ -172,7 +181,7 @@ diagnostics: check-context
 	mkdir -p diagnostics
 	-kubectl get events --all-namespaces --sort-by=.metadata.creationTimestamp > diagnostics/events.txt
 	-kubectl get pods --all-namespaces --output wide > diagnostics/pods.txt
-	-kubectl --namespace $(NAMESPACE) describe all,poddisruptionbudgets,prometheusrules > diagnostics/describe.txt
+	-kubectl --namespace $(NAMESPACE) describe all,poddisruptionbudgets,prometheusrules,scaledobjects > diagnostics/describe.txt
 	-kubectl --namespace $(MONITORING_NAMESPACE) describe all > diagnostics/describe-monitoring.txt
 	-kubectl --namespace $(NAMESPACE) logs --selector app.kubernetes.io/instance=$(RELEASE) \
 		--all-containers --prefix --tail=-1 > diagnostics/logs.txt

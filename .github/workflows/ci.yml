@@ -124,13 +124,14 @@ jobs:
                 -schema-location default \
                 -schema-location "$crd_schemas/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json" -
           done
-      # kubeconform has checked the shape of the PrometheusRule object and
-      # knows nothing of the expressions inside it. promtool, from the image
-      # of the Prometheus release the test cluster runs, reads the rules the
-      # way Prometheus will, and then runs the unit tests in tests/rules/:
-      # when each alert fires and clears, with the chart's default windows
-      # and thresholds.
-      - name: Check the alert rules and run their unit tests
+      # kubeconform has checked the shape of the PrometheusRule and the
+      # ScaledObject and knows nothing of the expressions inside them.
+      # promtool, from the image of the Prometheus release the test cluster
+      # runs, reads the rules the way Prometheus will, and then runs the unit
+      # tests in tests/rules/: when each alert fires and clears, with the
+      # chart's default windows and thresholds, and what number the
+      # autoscaler's query gives it to scale on.
+      - name: Check the alert rules and the autoscaler's query, and run their unit tests
         run: scripts/test-rules.sh
 
   image:

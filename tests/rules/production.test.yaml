@@ -241,9 +241,10 @@ tests:
       - series: 'inference_requests_queued{namespace="inference", job="inference", pod="b"}'
         values: '0x10'
       # The Deployment as kube-state-metrics reports it: under that exporter's
-      # own job, with the Deployment's namespace.
+      # own job, with the Deployment's namespace. Six replicas is as far as
+      # the autoscaler goes.
       - series: 'kube_deployment_spec_replicas{namespace="inference", deployment="inference", job="kube-state-metrics"}'
-        values: '2x10'
+        values: '6x10'
     alert_rule_test:
       - eval_time: 4m
         alertname: InferenceQueueAtMaxReplicas
@@ -256,7 +257,7 @@ tests:
               namespace: inference
               job: inference
             exp_annotations:
-              summary: Requests are queueing and the Deployment is at its maximum of 2 replicas.
+              summary: Requests are queueing and the Deployment is at its maximum of 6 replicas.
               description: >-
                 Requests have been waiting for a model slot for five minutes
                 while the Deployment already has as many replicas as it may
@@ -268,7 +269,7 @@ tests:
       - series: 'inference_requests_queued{namespace="inference", job="inference", pod="a"}'
         values: '4x10'
       - series: 'kube_deployment_spec_replicas{namespace="inference", deployment="inference", job="kube-state-metrics"}'
-        values: '1x10'
+        values: '5x10'
     alert_rule_test:
       - eval_time: 10m
         alertname: InferenceQueueAtMaxReplicas
