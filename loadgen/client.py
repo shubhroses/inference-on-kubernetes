@@ -35,12 +35,12 @@ class Connection:
 
     async def post(
         self, host: str, path: str, body: bytes, *, last: bool = False
-    ) -> tuple[int, bool]:
+    ) -> tuple[int, bytes, bool]:
         """Send one request and read the response to it.
 
-        Returns the status, and whether the connection may carry another
-        request. With `last`, the request tells the server that it is the only
-        one this connection will carry.
+        Returns the status, the body, and whether the connection may carry
+        another request. With `last`, the request tells the server that it is
+        the only one this connection will carry.
         """
         lines = [
             f"POST {path} HTTP/1.1",
@@ -67,13 +67,13 @@ class Connection:
             headers[name.strip().lower()] = value.strip().lower()
 
         if "content-length" not in headers:
-            # A body of unknown length. The status is all the caller wants, so
-            # the body is left unread, and the connection cannot be used again.
-            return status, False
-        await self._reader.readexactly(int(headers["content-length"]))
+            # A body of unknown length, which this service never sends. It is
+            # left unread, and the connection cannot be used again.
+            return status, b"", False
+        answer = await self._reader.readexactly(int(headers["content-length"]))
         self._last_used = time.monotonic()
         told_to_close = "close" in headers.get("connection", "").replace(" ", "").split(",")
-        return status, not (last or told_to_close)
+        return status, answer, not (last or told_to_close)
 
     async def close(self) -> None:
         self._writer.close()

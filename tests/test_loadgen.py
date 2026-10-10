@@ -4,7 +4,8 @@ The end-to-end tests conclude from its report that no request was lost, so the
 report has to be right, and the generator has to be the client it says it is:
 one that reuses connections, never sends a request twice, and calls everything
 but a 200 a failure. A test that needs failures counts on it to make exactly
-the share of the requests fail that it is told to.
+the share of the requests fail that it is told to, and the autoscaling test on
+it to keep exactly as many requests under way as it has clients.
 """
 
 import asyncio
@@ -22,7 +23,8 @@ import pytest
 from app.api import create_app
 from app.config import Settings
 from app.server import DrainingServer
-from loadgen.load import percentile, run
+from loadgen import load as loadgen
+from loadgen.load import by_slice, percentile, run
 from tests.helpers import PATIENCE_SECONDS, REPOSITORY, Gate, Service, free_port, until
 
 # A run of 40 requests, sent within a fifth of a second: 20 for the 4 clients
@@ -90,13 +92,17 @@ async def scripted_server(
 
 
 @asynccontextmanager
-async def the_service(*, fault_injection: bool = False) -> AsyncIterator[str]:
-    """The real service on a socket, with a model that takes no time. Yields its URL."""
+async def the_service(*, model: Gate | None = None, **settings: object) -> AsyncIterator[str]:
+    """The real service on a socket, with a model that takes no time. Yields its URL.
+
+    With a gate for `model`, every request stays in the model until the test
+    opens the gate.
+    """
     no_lame_duck = Gate()
     no_lame_duck.open()
-    app = create_app(
-        Settings(model_load_seconds=0, model_infer_seconds=0, fault_injection=fault_injection)
-    )
+    takes_no_time = model or Gate()
+    takes_no_time.open()  # for the model's load, at least
+    app = create_app(Settings(**settings), sleep=takes_no_time)
     # A keep-alive timeout no test outlasts: the server never closes an idle connection.
     server = DrainingServer(app, "127.0.0.1", 0, 2 * PATIENCE_SECONDS, sleep=no_lame_duck)
     serving = asyncio.create_task(server.serve())
@@ -104,6 +110,8 @@ async def the_service(*, fault_injection: bool = False) -> AsyncIterator[str]:
     address = f"http://127.0.0.1:{server.servers[0].sockets[0].getsockname()[1]}"
     async with httpx.AsyncClient(base_url=address) as http:
         await Service(http).wait_until_ready()
+    if model:
+        model.close()
     try:
         yield address + "/v1/infer"
     finally:
@@ -111,9 +119,10 @@ async def the_service(*, fault_injection: bool = False) -> AsyncIterator[str]:
         await serving
 
 
-async def load(url: str, **changes: float) -> dict:
+async def load(url: str, **changes: float | None) -> dict:
     settings = {
         "rate": RATE,
+        "clients": None,
         "seconds": SECONDS,
         "connections": CONNECTIONS,
         "max_idle": PATIENCE_SECONDS,
@@ -132,6 +141,11 @@ async def test_the_service_answers_every_request_of_a_run():
     assert summary["errors"] == {}
     latency = summary["latency_seconds"]
     assert 0 < latency["p50"] <= latency["p95"] <= latency["p99"] <= latency["max"]
+    # What the service said of each request's wait for a slot, for the one
+    # slice of the run there was.
+    (queue_wait,) = summary["queue_wait_seconds"]
+    assert queue_wait["from_second"] == 0
+    assert 0 <= queue_wait["p50"] <= queue_wait["max"]
 
 
 async def test_half_the_requests_share_the_kept_connections_and_half_open_their_own():
@@ -258,6 +272,61 @@ async def test_a_service_without_fault_injection_fails_none_of_them():
     assert (summary["requests"], summary["failures"]) == (40, 0)
 
 
+async def test_clients_that_send_one_request_after_another_each_have_one_under_way():
+    clients, slots = 3, 2
+    model = Gate()  # closed: every request stays in the model until the test lets it go
+    async with (
+        the_service(model=model, model_slots=slots) as url,
+        httpx.AsyncClient(base_url=url.removesuffix("/v1/infer")) as http,
+    ):
+        seconds = 0.05
+        running = asyncio.create_task(load(url, rate=None, clients=clients, seconds=seconds))
+        # One request from each client: two hold the slots and the third waits.
+        await Service(http).wait_for(in_flight=slots, queued=clients - slots)
+        await asyncio.sleep(seconds)  # the run's time is up, so no client sends another
+        model.open()
+        summary = await running
+
+    # Had a client not waited for its answer, there would have been a fourth.
+    assert (summary["requests"], summary["failures"]) == (clients, 0)
+    assert summary["kept_connections_opened"] == 0
+    (queue_wait,) = summary["queue_wait_seconds"]
+    assert queue_wait["p50"] < queue_wait["max"]  # one of the three had to wait for a slot
+
+
+async def test_clients_that_send_one_request_after_another_connect_anew_for_each():
+    async with scripted_server(OK) as (url, seen):
+        summary = await load(url, rate=None, clients=2, seconds=0.05)
+
+    assert summary["failures"] == 0
+    assert summary["requests"] == seen.requests >= 2
+    assert seen.connections == seen.requests
+    assert summary["kept_connections_opened"] == 0
+
+
+async def test_a_client_whose_request_failed_waits_before_it_sends_the_next(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # Longer than the run, so that the wait outlasts it.
+    monkeypatch.setattr(loadgen, "RETRY_SECONDS", 0.2)
+    async with scripted_server(UNAVAILABLE) as (url, seen):
+        summary = await load(url, rate=None, clients=2, seconds=0.05)
+
+    assert summary["errors"] == {"new connection: status 503": 2}
+    assert seen.requests == 2
+
+
+def test_queue_waits_are_reported_for_each_half_minute_of_the_run():
+    # Each is the second of the run in which a request was sent, and its wait.
+    waits = [(0.0, 0.2), (29.9, 0.4), (30.0, 0.1), (95.0, 0.3)]
+
+    assert by_slice(waits) == [
+        {"from_second": 0, "p50": 0.2, "p95": 0.4, "p99": 0.4, "max": 0.4},
+        {"from_second": 30, "p50": 0.1, "p95": 0.1, "p99": 0.1, "max": 0.1},
+        {"from_second": 90, "p50": 0.3, "p95": 0.3, "p99": 0.3, "max": 0.3},
+    ]
+
+
 def test_percentiles_are_values_that_were_measured():
     hundred = [number / 100 for number in range(100, 0, -1)]  # 1.00 down to 0.01
 
@@ -288,6 +357,25 @@ async def test_the_command_prints_the_summary_as_one_line_of_json():
     summary = json.loads(output)
     assert (summary["requests"], summary["failures"]) == (20, 0)
     assert len(output.splitlines()) == 1
+
+
+async def test_the_command_takes_a_number_of_clients_in_place_of_a_rate():
+    async with the_service() as url:
+        status, output = await command("--url", url, "--clients", "2", "--seconds", "0.1")
+
+    assert status == 0
+    summary = json.loads(output)
+    assert summary["requests"] >= 2
+    assert summary["failures"] == 0
+
+
+@pytest.mark.parametrize(
+    "how", [[], ["--rate", "100", "--clients", "2"], ["--clients", "0"]], ids=str
+)
+async def test_the_command_wants_either_a_rate_or_a_number_of_clients(how: list[str]):
+    status, output = await command("--url", "http://127.0.0.1:1/v1/infer", "--seconds", "0.1", *how)
+
+    assert (status, output) == (2, b"")
 
 
 async def test_the_command_takes_the_share_of_requests_to_fail():

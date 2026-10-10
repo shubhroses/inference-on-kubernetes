@@ -1,4 +1,4 @@
-"""Entry point: `python -m loadgen --url URL --rate N --seconds N`.
+"""Entry point: `python -m loadgen --url URL --seconds N` with `--rate N` or `--clients N`.
 
 Prints the summary of the run to standard output, as one line of JSON.
 Progress, and every failed request as it happens, go to standard error.
@@ -13,16 +13,28 @@ from loadgen.load import run
 
 parser = argparse.ArgumentParser(
     prog="python -m loadgen",
-    description="Send requests to the service at a fixed rate and report how they went.",
+    description="Send requests to the service, at a fixed rate or from a fixed number of clients,"
+    " and report how they went.",
 )
 parser.add_argument("--url", required=True, help="where to POST, for example http://host/v1/infer")
-parser.add_argument("--rate", required=True, type=float, help="requests per second")
-parser.add_argument("--seconds", required=True, type=float, help="how long to send them for")
+parser.add_argument("--seconds", required=True, type=float, help="how long to send requests for")
+how = parser.add_mutually_exclusive_group(required=True)
+how.add_argument(
+    "--rate",
+    type=float,
+    help="requests per second, sent at fixed times whether or not earlier ones were answered",
+)
+how.add_argument(
+    "--clients",
+    type=int,
+    help="clients that each send one request after another, the next when the last is answered",
+)
 parser.add_argument(
     "--connections",
     type=int,
     default=8,
-    help="clients that keep a connection open; they send every other request (default: 8)",
+    help="with --rate: clients that keep a connection open; they send every other request"
+    " (default: 8)",
 )
 parser.add_argument(
     "--max-idle",
@@ -49,6 +61,8 @@ arguments = parser.parse_args()
 if arguments.connections < 1:
     # Every other request waits for one of these clients to take it.
     parser.error("--connections has to be at least 1")
+if arguments.clients is not None and arguments.clients < 1:
+    parser.error("--clients has to be at least 1")
 if not 0 <= arguments.fail_ratio <= 1:
     parser.error("--fail-ratio has to be between 0 and 1")
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")
