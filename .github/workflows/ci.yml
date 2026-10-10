@@ -59,10 +59,15 @@ jobs:
         run: >
           docker run --rm --volume "$PWD:/repo:ro" --workdir /repo --entrypoint shellcheck
           "$ACTIONLINT_IMAGE" --external-sources scripts/*.sh
-      # The four steps below each print the lines that break the rule, if any.
+      # The five steps below each print the lines that break the rule, if any.
       - name: Check that every image and chart in versions.env is pinned by digest
         run: |
           if grep -E '^[A-Z0-9_]+_(IMAGE|CHART)=' versions.env | grep -Ev '@sha256:[0-9a-f]{64}$'; then
+            exit 1
+          fi
+      - name: Check that every schema repository in versions.env is pinned to a commit SHA
+        run: |
+          if grep -E '^[A-Z0-9_]+_COMMIT=' versions.env | grep -Ev '=[0-9a-f]{40}$'; then
             exit 1
           fi
       - name: Check that every action is pinned to a commit SHA
@@ -106,14 +111,19 @@ jobs:
           helm lint --strict chart --values chart/values-kind.yaml --set-string image.tag="$GITHUB_SHA"
       # kubeconform checks each rendered object against the API schema of the
       # Kubernetes version the test cluster runs, so a misspelt field or a value
-      # of the wrong type fails here, without a cluster. The second schema
-      # location is for the kinds Kubernetes itself does not define, such as
-      # ServiceMonitor; kubeconform fills in the {{ }} parts for each object.
+      # of the wrong type fails here, without a cluster. It is given two places
+      # to look, each a repository at the commit pinned in versions.env. The
+      # first is where it looks by default, for the kinds that are part of
+      # Kubernetes; it is written out so that the commit can be named, and
+      # kubeconform adds the path of each schema itself. The second is for
+      # the kinds Kubernetes itself does not define, such as ServiceMonitor;
+      # kubeconform fills in the {{ }} parts for each object.
       # pipefail makes a failing `helm template` fail the step, where it would
       # otherwise hand kubeconform an empty input to approve.
       - name: Validate the rendered manifests against the API schemas
         run: |
           set -o pipefail
+          kubernetes_schemas="https://raw.githubusercontent.com/yannh/kubernetes-json-schema/$KUBERNETES_SCHEMAS_COMMIT"
           crd_schemas="https://raw.githubusercontent.com/datreeio/CRDs-catalog/$CRD_SCHEMAS_COMMIT"
           for values in chart/values.yaml chart/values-kind.yaml; do
             echo "With $values:"
@@ -121,7 +131,7 @@ jobs:
               --set-string image.tag="$GITHUB_SHA" |
               docker run --rm --interactive "$KUBECONFORM_IMAGE" \
                 -strict -verbose -summary -kubernetes-version "$KUBERNETES_VERSION" \
-                -schema-location default \
+                -schema-location "$kubernetes_schemas" \
                 -schema-location "$crd_schemas/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json" -
           done
       # kubeconform has checked the shape of the PrometheusRule and the
