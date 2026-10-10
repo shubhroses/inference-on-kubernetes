@@ -156,6 +156,7 @@ Nothing in this section is tested in this repository: it has no GPU and no real 
 - The autoscaler runs on the test cluster with a faster scrape and shorter windows than the defaults. With the defaults its number is the average of four readings a minute, each of which can be several requests off, so a steady load near a boundary will now and then get one pod more than the arithmetic says. Clients that keep their connections stay with the pods they first reached; adding pods does nothing for them until they reconnect.
 - The chart takes its surroundings for granted: the CRDs of the Prometheus Operator and of KEDA, a Grafana sidecar that looks for the label `grafana_dashboard`, a Prometheus data source with the UID `prometheus`, and a Prometheus at `autoscaling.prometheusAddress`. It has no switches for a cluster without them. The dashboard's threshold lines are those of the default values.
 - No image is published. `make up` builds it and copies it onto the kind nodes.
+- The image scan fails only on findings that have a fix. The base image's Debian packages also have findings without one, some of them rated High, and the scan leaves those out.
 - The images that the kube-prometheus-stack and KEDA charts run are named by tag inside those charts; the charts themselves are pinned, by digest and by checksum. Trivy's database is not pinned, so the same commit can pass today and fail later. Nothing updates the pins automatically.
 
 ## Run it locally
