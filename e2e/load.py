@@ -116,13 +116,21 @@ def summary(job: str) -> dict[str, Any]:
     return json.loads(log.splitlines()[-1])
 
 
-def save_report(name: str, title: str, load: dict[str, Any] | None, notes: list[str]) -> None:
+def save_report(
+    name: str,
+    title: str,
+    load: dict[str, Any] | None,
+    notes: list[str],
+    timeline: list[tuple[str, str]] | None = None,
+) -> None:
     """Keep what a test measured, whether or not the test goes on to pass.
 
     `load` is the load generator's summary of a run, if the test has one.
+    `timeline` is a table of what the test saw change, and when, if it
+    followed something over time. Its first row names the two columns.
     """
     REPORTS.mkdir(exist_ok=True)
-    report = {"test": title, "load": load, "notes": notes}
+    report = {"test": title, "load": load, "timeline": timeline or [], "notes": notes}
     (REPORTS / f"{name}.json").write_text(json.dumps(report, indent=2) + "\n")
 
 

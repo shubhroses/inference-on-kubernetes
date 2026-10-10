@@ -131,9 +131,7 @@ def test_the_replica_count_follows_the_load_one_pod_at_a_time_and_returns() -> N
     too_fast = rises_faster_than(ONE_POD, EVERY_SECONDS, samples)
     # How long requests waited for a slot, for each half minute of the load.
     queue_waits = summary["queue_wait_seconds"]
-    notes = [
-        f"{CLIENTS} clients for {SECONDS} s. Replicas asked for: {changes(samples, began, ended)}."
-    ]
+    notes = [f"{CLIENTS} clients for {SECONDS} s, each with one request under way."]
     if counted:
         notes.append(
             f"Requests per pod as the autoscaler counted them during the load,"
@@ -145,7 +143,8 @@ def test_the_replica_count_follows_the_load_one_pod_at_a_time_and_returns() -> N
             f" {percentiles(queue_waits[0])}."
             f" In its last {SLICE_SECONDS} s: {percentiles(queue_waits[-1])}."
         )
-    load.save_report("6-autoscaling", "Autoscaling", summary, notes)
+    timeline = replica_timeline(samples, began, ended)
+    load.save_report("6-autoscaling", "Autoscaling", summary, notes, timeline)
 
     # A request that is shed, or lost while a pod starts, is a failure here too.
     assert summary["failures"] == 0, summary["errors"]
@@ -208,16 +207,20 @@ def rises_faster_than(pods: int, seconds: float, samples: list[Sample]) -> list[
     return [f"from {low} to {high} within {took:.0f} s" for (low, high), took in quickest.items()]
 
 
-def changes(samples: list[Sample], began: float, ended: float) -> str:
-    """The counts the samples went through, each with the time it was first seen."""
-    told = [f"{samples[0].replicas} at the start"]
+def replica_timeline(samples: list[Sample], began: float, ended: float) -> list[tuple[str, str]]:
+    """The counts the samples went through, each with the time it was first seen.
+
+    A table for the report: the first row names its columns.
+    """
+    rows = [("When", "Replicas asked for"), ("before the load", str(samples[0].replicas))]
     for before, after in itertools.pairwise(samples):
         if after.replicas != before.replicas:
             if after.answered <= ended:
-                told.append(f"{after.replicas} after {after.answered - began:.0f} s of load")
+                when = f"{after.answered - began:.0f} s after the load began"
             else:
-                told.append(f"{after.replicas} at {after.answered - ended:.0f} s after its end")
-    return ", ".join(told)
+                when = f"{after.answered - ended:.0f} s after the load ended"
+            rows.append((when, str(after.replicas)))
+    return rows
 
 
 def spans(counted: dict[int, list[float]]) -> str:

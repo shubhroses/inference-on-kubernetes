@@ -62,6 +62,8 @@ def test_the_page_fires_while_requests_fail_and_clears_when_they_stop() -> None:
     # Whatever the tests before this one did to the error ratio has to be over.
     eventually(lambda: the_page_is("inactive"), CATCH_UP_SECONDS)
 
+    # What the page did and when, for the report: a table, column names first.
+    timeline = [("When", PAGE), ("before the failures", "inactive")]
     notes: list[str] = []
     try:
         began = time.monotonic()
@@ -69,9 +71,15 @@ def test_the_page_fires_while_requests_fail_and_clears_when_they_stop() -> None:
         eventually(lambda: the_page_is("firing"), began + DEADLINE_SECONDS - time.monotonic())
         fired_after = time.monotonic() - began
         sent, failed = load.progress(failing)
+        timeline.append(
+            (
+                f"{fired_after:.0f} s after a load began in which {FAIL_RATIO:.0%} of the"
+                " requests ask to fail",
+                "firing",
+            )
+        )
         notes.append(
-            f"The page was firing {fired_after:.0f} s after the load began in which"
-            f" {FAIL_RATIO:.0%} of the requests ask to fail: {failed} of {sent} had failed,"
+            f"When the page was seen firing, {failed} of {sent} requests had failed,"
             f" and the error ratio was {error_ratios()}."
         )
         # The page has to be about these requests and nothing else.
@@ -83,10 +91,10 @@ def test_the_page_fires_while_requests_fail_and_clears_when_they_stop() -> None:
         recovering = load.start("alert-recovery", seconds=DEADLINE_SECONDS)
         eventually(lambda: the_page_is("inactive"), stopped + DEADLINE_SECONDS - time.monotonic())
         cleared_after = time.monotonic() - stopped
-        notes.append(f"It was gone {cleared_after:.0f} s after the failures stopped.")
+        timeline.append((f"{cleared_after:.0f} s after the failures stopped", "inactive"))
         load.stop(recovering)
     finally:
-        load.save_report("7-alerting", "Alerting", None, notes)
+        load.save_report("7-alerting", "Alerting", None, notes, timeline)
 
 
 def the_page_is(state: str) -> None:
