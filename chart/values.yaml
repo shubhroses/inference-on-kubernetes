@@ -100,7 +100,8 @@ service:
 termination:
   # Has to be longer than it takes the news of step 1 to reach every node. If
   # it is not, a new connection arrives at a pod that has stopped listening.
-  # On the kind cluster in CI the news took a little under a second.
+  # In the one CI run made without this delay, new connections were refused
+  # for 0.7 s and 0.9 s, so on the kind cluster the news took under a second.
   preStopSeconds: 10
   # How long the service keeps an idle connection open, at any time, and so
   # also how long a stopping pod waits for its open connections in step 2. A
@@ -168,8 +169,9 @@ alerts:
     # that something else is slow.
     p95Seconds: 0.5
 
-# Measured on a laptop with the defaults above: a pod uses about 40 MiB of
-# memory, and about a tenth of a core when all eight slots are busy.
+# Measured once by hand on a laptop with the defaults above (no test checks
+# it): a pod uses about 40 MiB of memory, and about a tenth of a core when all
+# eight slots are busy.
 resources:
   requests:
     cpu: 100m
