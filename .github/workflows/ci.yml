@@ -4,13 +4,23 @@ on:
   push:
     branches: [main, "wip/**"]
   pull_request:
+  # Every week, on main, for what changes without a push. Trivy's database of
+  # vulnerabilities is not pinned, so the image that passed the scan one week
+  # can fail it the next, when a fix has been published for something in it.
+  # The other jobs run as well: they fetch their tools, packages and schemas
+  # from registries, from PyPI and from GitHub, and a run in a week without a
+  # push shows whether all of that is still there.
+  schedule:
+    - cron: "43 6 * * 1" # Mondays at 06:43 UTC
 
 permissions:
   contents: read
 
 # A newer push to the same branch or pull request replaces the run in progress.
+# The event is part of the group, so that the weekly run and a push to main,
+# which are on the same branch, leave each other alone.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 # Tool and image versions come from versions.env. Each job copies its NAME=value
