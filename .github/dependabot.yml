@@ -1,0 +1,76 @@
+# Dependabot proposes updates to the pins it can read: every Monday it opens
+# one pull request for each group below whose pins are behind. No cooldown is
+# set here, so how long it leaves a new version alone before proposing it is
+# Dependabot's own default. Nothing merges a pull request automatically.
+#
+# A pull request runs ci.yml, and e2e.yml as well when it changes a file that
+# workflow lists: a lock file, the Dockerfile or e2e.yml itself.
+#
+# Not covered, because Dependabot does not read versions.env: the tool images,
+# the kind node images, the two charts, and the versions and checksums of
+# kind, kubectl and Helm. Those are moved by hand.
+version: 2
+updates:
+  # The actions the workflows use. Each is pinned by commit, with the version
+  # in a comment behind it. ci.yml fails on a `uses:` that does not name a
+  # full commit SHA.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00" # UTC
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # The two lock files, requirements.txt and requirements-dev.txt, which
+  # `uv pip compile` wrote with hashes from the two .in files. That is why the
+  # ecosystem is uv and not pip, which is the one for locks that pip-compile
+  # wrote. "all" adds the packages that are in a lock only because another
+  # package needs them. Those of requirements.txt are in the image as well,
+  # and the image scan does not ask how a vulnerable package got there.
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00" # UTC
+    allow:
+      - dependency-type: all
+    groups:
+      python:
+        patterns: ["*"]
+
+  # The base image, in the first FROM line of the Dockerfile, pinned by
+  # digest. A new digest under the same tag is how a rebuilt image arrives,
+  # and with it the fixes for its Debian packages. A patch release of Python
+  # arrives as a new tag. A newer minor or major release is not taken from
+  # here: the lock files, ruff and PYTHON_VERSION in versions.env name the
+  # same minor version and have to move with it.
+  #
+  # Dependabot changes the Dockerfile and nothing else. versions.env repeats
+  # the reference as PYTHON_IMAGE, and ci.yml fails while the two differ, so
+  # that line has to be changed by hand in the same pull request, and
+  # PYTHON_VERSION too when the tag is a new one.
+  #
+  # The Dockerfile pulls from Google's mirror of Docker Hub, so the mirror is
+  # the registry Dependabot asks, and the image's name there is
+  # library/python. The mirror does not list every tag Docker Hub has: on
+  # 12 October 2026 its list had the slim-trixie tags of 3.13.11 and 3.13.15
+  # and not those of the three releases between them, which Docker Hub has.
+  # A new patch release can therefore be proposed later than it appears.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00" # UTC
+    ignore:
+      - dependency-name: library/python
+        update-types:
+          - version-update:semver-major
+          - version-update:semver-minor
+    groups:
+      base-image:
+        patterns: ["*"]
