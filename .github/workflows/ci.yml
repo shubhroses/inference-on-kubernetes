@@ -1,6 +1,9 @@
 name: ci
 
 on:
+  # Every push to main. A push to a branch named wip/... starts this workflow
+  # too: that is how a change is rehearsed before it reaches main, and the
+  # README says how.
   push:
     branches: [main, "wip/**"]
   pull_request:

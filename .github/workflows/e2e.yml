@@ -1,6 +1,9 @@
 name: e2e
 
 on:
+  # Every push to main. A push to a branch named wip/... starts this workflow
+  # too: that is how a change is run on a cluster before it reaches main, and
+  # the README says how.
   push:
     branches: [main, "wip/**"]
   # On a pull request, only when it changes something that reaches the cluster.

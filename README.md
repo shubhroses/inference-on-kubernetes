@@ -26,7 +26,16 @@ Each arrow points from the one that acts. The load generator stands for the serv
 
 ## What CI proves
 
-[`ci.yml`](.github/workflows/ci.yml) needs no cluster and takes about a minute. [`e2e.yml`](.github/workflows/e2e.yml) creates the kind cluster on the runner, installs Prometheus, Grafana, KEDA and the chart, and runs the end-to-end tests, once on Kubernetes 1.36 and once on 1.35, in about a quarter of an hour each. Both run on every push to main; `ci.yml` also on every pull request, `e2e.yml` on pull requests that change what reaches the cluster, and on a nightly schedule.
+[`ci.yml`](.github/workflows/ci.yml) needs no cluster and takes about a minute. [`e2e.yml`](.github/workflows/e2e.yml) creates the kind cluster on the runner, installs Prometheus, Grafana, KEDA and the chart, and runs the end-to-end tests, once on Kubernetes 1.36 and once on 1.35, in about a quarter of an hour each.
+
+| Workflow | What starts it |
+|---|---|
+| `ci.yml` | Every push to `main`, every pull request, and a schedule: Mondays at 06:43 UTC. |
+| `e2e.yml` | Every push to `main`, a pull request that changes what reaches the cluster or the tests that run there, and a schedule: every night at 07:17 UTC. |
+
+A push to a branch whose name starts with `wip/` starts both workflows as well. That is how a change is rehearsed before it reaches `main`: it is pushed to such a branch, both workflows have to pass there, the cluster tests included, and `main` is then moved forward to the same tree and the branch deleted. Nothing that needs a cluster has to run on a workstation for it. The runs on `wip/` branches in the [list of runs](https://github.com/shubhroses/inference-on-kubernetes/actions) come from that: rehearsals of what then went to `main`, and experiments that were never meant to.
+
+The two schedules are for what changes without a push. The nightly run of `e2e.yml` meets whatever is new outside the repository, a runner image or a registry, and shows a test that does not pass every time. Its first two runs were on 11 and 12 October 2026 ([run 41](https://github.com/shubhroses/inference-on-kubernetes/actions/runs/38121803413) and [run 42](https://github.com/shubhroses/inference-on-kubernetes/actions/runs/38220504438) of `e2e.yml`). GitHub started them at 07:34 and 07:55 UTC, and in both all 19 tests passed on each Kubernetes release. The weekly run of `ci.yml` is for the image scan: Trivy's database of vulnerabilities is not pinned, so an image that passed can fail once a fix has been published for something in it. That schedule was added on 12 October 2026 and had not yet fired when this was written.
 
 | Claim | Test | Run it |
 |---|---|---|
@@ -57,6 +66,8 @@ Each arrow points from the one that acts. The load generator stands for the serv
 | Autoscaling | 37079 | 0 | 104 ms | 189 ms | 226 ms | 302 ms |
 
 In that run the autoscaler asked for a third pod 37 s after the load was started and for a fourth 30 s later, and was back at 2 pods 75 s after the load ended. The page was firing 38 s after the failing requests were started and was gone 19 s after they stopped.
+
+The two nightly runs named above are four more jobs. In each of them the rollout and the drain failed none of their 1,800 requests and the autoscaling load none of its 36,352 to 37,542, the fourth pod was asked for 30 s after the third, and the page was firing 38 to 44 s after the failing requests were started and gone 17 to 21 s after they stopped. Their runners had more memory than the one above: the last line of each summary reports 15,988 or 15,989 MiB, where that run's reports 7,938.
 
 ## What happens when a pod is told to go
 
@@ -157,7 +168,11 @@ Nothing in this section is tested in this repository: it has no GPU and no real 
 - The chart takes its surroundings for granted: the CRDs of the Prometheus Operator and of KEDA, a Grafana sidecar that looks for the label `grafana_dashboard`, a Prometheus data source with the UID `prometheus`, and a Prometheus at `autoscaling.prometheusAddress`. It has no switches for a cluster without them. The dashboard's threshold lines are those of the default values.
 - No image is published. `make up` builds it and copies it onto the kind nodes.
 - The image scan fails only on findings that have a fix. The base image's Debian packages also have findings without one, some of them rated High, and the scan leaves those out.
-- The images that the kube-prometheus-stack and KEDA charts run are named by tag inside those charts; the charts themselves are pinned, by digest and by checksum. Trivy's database is not pinned, so the same commit can pass today and fail later. Nothing updates the pins automatically.
+- The images that the kube-prometheus-stack and KEDA charts run are named by tag inside those charts; the charts themselves are pinned, by digest and by checksum.
+- Trivy's database is not pinned, so the same commit can pass today and fail later. The weekly run of `ci.yml` is there so that this shows within a week and not only at the next push. Nothing reports it sooner.
+- [Dependabot](.github/dependabot.yml) is asked every Monday for updates to three kinds of pin: the actions, the two Python lock files and the base image in the Dockerfile. It does not read [`versions.env`](versions.env), so nothing proposes updates to the tool images, the kind node images, the two charts or kind, kubectl and Helm. Its pull request for the base image changes the Dockerfile only; `versions.env` repeats that reference and CI fails while the two differ, so the second line has to be changed by hand before that pull request can pass. The Dockerfile names Google's mirror of Docker Hub, and the mirror does not list every tag: on 12 October 2026 its list lacked the `slim-trixie` tags of three releases of Python 3.13 that Docker Hub had, so a new patch release may be proposed late.
+- GitHub switches a scheduled workflow off in a public repository after 60 days without activity in it. Both schedules here are subject to that.
+- On 12 October 2026, when this was last revised, the weekly schedule of `ci.yml` had not fired and Dependabot had not opened a pull request. No pull request of any kind had been opened in this repository, so the two workflows had run only on pushes and, for `e2e.yml`, on its schedule.
 
 ## Run it locally
 
@@ -212,6 +227,7 @@ Where things are:
 | [`e2e/`](e2e) | The end-to-end tests, which drive `kubectl`, `helm` and the HTTP APIs of Prometheus and Grafana. |
 | [`Makefile`](Makefile), [`scripts/`](scripts) | `make up`, `make test`, `make e2e` and `make down`, the same on a laptop and in CI, and the checks that are shell scripts. |
 | [`versions.env`](versions.env) | The pinned tools, images and charts, in one place. |
+| [`.github/`](.github) | The two workflows, and what Dependabot is asked to keep up to date. |
 
 ## Licence
 
